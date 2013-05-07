@@ -1,5 +1,5 @@
 CC:=gcc
-CFLAGS:=-Wall -g -DWITH_AES_DECRYPT
+CFLAGS:=-Wall -g -DWITH_AES_DECRYPT -DNSDEBUG
 SOURCES:= needham.c util.c rin_wrapper.c csiphash.c rijndael/rijndael.c
 OBJECTS:= $(patsubst %.c, %.o, $(SOURCES))
 HEADERS:= needham.h rin_wrapper.h util.h

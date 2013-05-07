@@ -1,6 +1,6 @@
-# SNS - a simple Needham-Schroeder C-library
+# sNS - a simple Needham-Schroeder C-library
 
-SNS is a small and simple C-library to perform the (symmetric) Needham-Schroeder(NS)-protocol. It provides basic functions to:
+sNS is a small and simple C-library to perform the (symmetric) Needham-Schroeder(NS)-protocol. It provides basic functions to:
 
 * Run a NS-server, creating and distributing keys for securing some other protocol (for example DTLS in pre-shared-key mode)
 * Run a NS-daemon, waiting for clients to initialize the communication
@@ -19,16 +19,16 @@ See [wikipedia/Needham-Schroeder_protocol](http://en.wikipedia.org/wiki/Needham%
 
 ## Known Flaws / TODOs
 
-* Currently the library only supports one key exchange at the time (TODO Session multiplexing)
+* Nonce altering and verification needs to be implemented
 * The library needs to handle lossy networks (TODO implement retransmissions)
 * Compatibility with Contiki-OS is planned for future work
 
 ## Authors and Contact
 
-SNS was written by Andreas Bender <bender@tzi.de>
+sNS was written by Andreas Bender <bender@tzi.de>
 
 If you have any questions, remarks, suggestion, improvements,
-etc. feel free to drop a line at the addresses given above.
+etc. feel free to drop a line at the address given above.
 
 ## License
 

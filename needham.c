@@ -34,6 +34,8 @@
 
 #include "rin_wrapper.h"
 
+/* -------------------------------- #0 Common ------------------------------ */
+
 /* Slightly modified version of resolve_address from libtinydtls by Olaf Bergmann
  ( MIT License: http://tinydtls.sourceforge.net/)  */
 int
@@ -128,8 +130,6 @@ int ns_bind_socket(int port, unsigned char family) {
   return s;
 }
 
-/* --------------------------------- Common -------------------------------- */
-
 /**
  * TODO implement!
  */
@@ -144,7 +144,14 @@ int ns_verify_nonce(char *nonce) {
   return 0;
 }
 
-/* ------------------------------- NS Server ------------------------------- */
+/**
+ * TODO implement!
+ */
+int ns_daemon_verify_nonce(ns_daemon_peer_t *peer, char *nonce) {
+  return 0;
+}
+
+/* ------------------------------ #1 NS Server ----------------------------- */
 
 /*
  * Handle a key request coming from \p socket . The packet is stored in \p in_buffer
@@ -258,7 +265,7 @@ void ns_server(ns_server_handler_t *handler, int port) {
   }
 }
 
-/* ------------------------------- NS Client ------------------------------- */
+/* ------------------------------ #2 NS Client ----------------------------- */
 
 void ns_send_key_request(ns_client_context_t *context) {
 
@@ -427,94 +434,141 @@ int ns_get_key(ns_client_handler_t handler,
   return 0;
 }
 
-/* ------------------------------- NS Daemon ------------------------------- */
+/* ------------------------------ #3 NS Daemon ----------------------------- */
 
-void ns_handle_com_response(ns_daemon_context_t *context, char *in_buffer) {
+void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
+      char *in_buffer) {
   
-  char nonce[NS_NONCE_LENGTH];
+  char received_nonce[NS_NONCE_LENGTH];
   
-  decrypt((u_char*) context->peer_key, (u_char*) &in_buffer[1], (u_char*) nonce,
-      sizeof(nonce), NS_KEY_LENGTH);
+  decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
+      sizeof(received_nonce), NS_KEY_LENGTH);
       
-  if(ns_verify_nonce(nonce) == 0) {
+  /* only store the key if the nonce verification failed. otherwise the peer
+     will be deleted without storing any credentials */
+  if(ns_daemon_verify_nonce(peer, received_nonce) == 0) {
+    context->handler->store_key(peer->identity, peer->key);
     log_info("completed ns-handshake and stored new key.");
-  /* The nonce verification failed, delete the previously stored key */
-  } else {
-    // TODO implement
   }
+  
+  /* cleanup hash and free the used peer struct */
+  HASH_DEL(context->peers, peer);
+  free(peer);
 }
 
-void ns_send_com_challenge(ns_daemon_context_t *context, ns_abstract_address_t *peer,
-      char *client_identity) {
+void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
   
   char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
-  char nonce[NS_NONCE_LENGTH] = { 0 };
-  char key[NS_KEY_LENGTH] = { 0 };
-  
+
   out_buffer[0] = NS_STATE_COM_CHALLENGE;
   
   /* FIXME add padding when NONCE_LENGTH % 16 != 0 and check corresponding decryption */
-  random_key(nonce, NS_NONCE_LENGTH);
+  random_key(peer->nonce, NS_NONCE_LENGTH);
   
-  /* Get key for this communication partner */
-  context->handler->get_key(client_identity, key);
-  
-  encrypt((u_char*) key, (u_char*) nonce, (u_char*) &out_buffer[1],
+  encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &peer->addr.sa, peer->size);
+        &peer->addr.addr.sa, peer->addr.size);
   log_debug("Sent com challenge to peer.");
 }
 
-void ns_handle_com_request(ns_daemon_context_t *context, ns_abstract_address_t *peer,
+void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
       char *in_buffer) {
   
   char dec_pkt[NS_KEY_LENGTH+NS_IDENTITY_LENGTH];
 
-  decrypt((u_char*) context->daemon_ns_key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
+  decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
       sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
-      
-  char key[NS_KEY_LENGTH+1] = { 0 };
-  char client_identity[NS_IDENTITY_LENGTH+1] = { 0 };
     
-  memcpy(key, dec_pkt, NS_KEY_LENGTH);
-  memcpy(client_identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
+  /* Temporarily remember the clients credentials, they will be stored via
+     callback when the nonce verification succeeded */
+  memcpy(peer->key, dec_pkt, NS_KEY_LENGTH);
+  memcpy(peer->identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
   
-  log_debug("received com request. ( Sender-ID: %s, Key: %s )", client_identity, key);
+#ifdef NSDEBUG
+  // Fixme shorter way to print these as strings?
+  char d_key[NS_KEY_LENGTH+1] = { 0 };
+  char d_identity[NS_IDENTITY_LENGTH+1] = { 0 };
+  memcpy(d_key, peer->key, NS_KEY_LENGTH);
+  memcpy(d_identity, peer->identity, NS_IDENTITY_LENGTH);
+  log_debug("received com request. ( Sender-ID: %s, Key: %s )", d_identity, d_key);
+#endif
   
-  context->handler->store_key(client_identity, key);
-  
-  // FIXME quick and dirty, this way only 1 client can talk to the daemon at the
-  // same time
-  memcpy(context->peer_key, key, NS_KEY_LENGTH);
-  
-  ns_send_com_challenge(context, peer, client_identity);
+  ns_send_com_challenge(context, peer);
 }
 
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *key) {
+/**
+ * Finds or creates a daemon peer for the daemons context.
+ *
+ * @return A pointer to the found or created peer or NULL on any error (which
+ *       propably will be not enough memory in constrained environments)
+ */
+ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
+      ns_abstract_address_t *peer_addr) {
+  
+  ns_daemon_peer_t *peer;
+  
+  HASH_FIND(hh, context->peers, peer_addr, sizeof(ns_abstract_address_t), peer);
+  if(peer) {
+    log_debug("found existing peer");
+    return peer;
+  }
+  
+  /* peer doesn't exist, create and store a new one */
+  peer = (ns_daemon_peer_t*) malloc(sizeof(ns_daemon_peer_t));
+  
+  /* propably enough memory available to malloc */
+  if(!peer) {
+    log_warning("not enough memory to allocate memory for a new peer.");
+    return NULL;
+  }
+  
+  /* ok, we have enough memory and a newly created peer, initialize it with data */
+  memcpy(&peer->addr, peer_addr, sizeof(*peer_addr));
+  memset(&peer->nonce, 0, NS_NONCE_LENGTH);
+  memset(&peer->identity, 0, NS_IDENTITY_LENGTH);
+  memset(&peer->key, 0, NS_KEY_LENGTH);
+  peer->state = NS_STATE_COM_REQUEST;
+  
+  HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
+  log_debug("added new peer");
+  
+  return peer;
+}
+
+void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key) {
   
   ns_daemon_context_t context;
   context.handler = handler;
-  memcpy(context.daemon_ns_key, key, NS_RIN_KEY_LENGTH);
-  int s;
+  context.peers = NULL;
+  memcpy(context.key, key, NS_RIN_KEY_LENGTH);
+  memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
   char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
-  ns_abstract_address_t peer;
-  
+  ns_abstract_address_t peer_addr;
+  ns_daemon_peer_t *peer;
+
+  int s;
   s = ns_bind_socket(port, AF_INET6);
   context.socket = s;
   
-  peer.size = sizeof(peer.addr);
+  peer_addr.size = sizeof(peer_addr.addr);
 
   log_info("daemon running, waiting for com requests.");
 
   while(1) {
-    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer.addr.sa, &peer.size);
+    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer_addr.addr.sa, &peer_addr.size);
+
+    peer = ns_find_or_create_peer(&context, &peer_addr);
+    if(!peer) {
+      log_warning("no peer available to handle this request, discarding it.");
+      continue;
+    }
 
     if(in_buffer[0] == NS_STATE_COM_REQUEST) {
-      ns_handle_com_request(&context, &peer, in_buffer);
+      ns_handle_com_request(&context, peer, in_buffer);
     } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
-      ns_handle_com_response(&context, in_buffer);
+      ns_handle_com_response(&context, peer, in_buffer);
     } else {
       log_error("received unknown packet (code: %d)", in_buffer[0]);
     }

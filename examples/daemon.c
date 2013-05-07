@@ -38,12 +38,13 @@ int main(int argc, char **argv) {
   
   int port = 50002;
   char *key = "1111111111222222";
+  char *identity = "example_daemon";
   ns_daemon_handler_t handler  = {
     .store_key = store_key,
     .get_key = get_key
   };
   
-  ns_daemon(&handler, port, key);
+  ns_daemon(&handler, port, identity, key);
   
   return 0;
 }

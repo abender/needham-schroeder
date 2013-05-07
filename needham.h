@@ -24,8 +24,6 @@
  
 /**
  * TODOs
- *  - Implement session multiplexing so multiple clients can connect to a daemon
- *      at the same time.
  *  - Implement retransmissions to handle lossy networks
  *  - Compatibility with Contiki-OS
  */
@@ -193,17 +191,20 @@ typedef struct {
 } ns_client_context_t;
 
 typedef struct {
-// FIXME  UT_hash_handle hh;
+  UT_hash_handle hh;
   ns_abstract_address_t addr;
   char nonce[NS_NONCE_LENGTH];
+  char identity[NS_IDENTITY_LENGTH];
+  char key[NS_KEY_LENGTH];
+  int state;
 } ns_daemon_peer_t;
 
 typedef struct {
-  ns_daemon_handler_t *handler;
-  int socket;
-  char daemon_ns_key[NS_RIN_KEY_LENGTH];
-  char peer_key[NS_KEY_LENGTH];
   ns_daemon_peer_t *peers;
+  ns_daemon_handler_t *handler;
+  char identity[NS_IDENTITY_LENGTH];
+  char key[NS_RIN_KEY_LENGTH];
+  int socket;
 } ns_daemon_context_t;
 
 /**
@@ -221,9 +222,10 @@ void ns_server(ns_server_handler_t *handler, int port);
  *
  * @param handler Callbacks for the daemon. See struct description.
  * @param port The port the server should listen on
+ * @param identity The daemons identity as stored in the server
  * @param key The daemons key as stored in the server
  */
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *key);
+void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key);
 
 /**
  * Starts a client which will try to get a new key from the server to
