@@ -260,8 +260,7 @@ void ns_server(ns_server_handler_t *handler, int port) {
 
 /* ------------------------------- NS Client ------------------------------- */
 
-void ns_send_key_request(ns_client_context_t *context, char *client_identity,
-      char *partner_identity) {
+void ns_send_key_request(ns_client_context_t *context) {
 
   char nonce[NS_NONCE_LENGTH];
   random_key(nonce, NS_NONCE_LENGTH);
@@ -272,15 +271,16 @@ void ns_send_key_request(ns_client_context_t *context, char *client_identity,
   out_buffer[0] = NS_STATE_KEY_REQUEST;
   
   int pos = 1;
-  memcpy(&out_buffer[pos], client_identity, strnlen(client_identity, NS_IDENTITY_LENGTH));
+  memcpy(&out_buffer[pos], context->identity, strnlen(context->identity, NS_IDENTITY_LENGTH));
   pos += NS_IDENTITY_LENGTH;
-  memcpy(&out_buffer[pos], partner_identity, strnlen(partner_identity, NS_IDENTITY_LENGTH));
+  memcpy(&out_buffer[pos], context->peer->identity,
+        strnlen(context->peer->identity, NS_IDENTITY_LENGTH));
   pos += NS_IDENTITY_LENGTH;
   memcpy(&out_buffer[pos], nonce, NS_NONCE_LENGTH);
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &context->server_addr->addr.sa, context->server_addr->size);
-  context->state = NS_STATE_KEY_REQUEST;
+        &context->server_addr.addr.sa, context->server_addr.size);
+  context->peer->state = NS_STATE_KEY_REQUEST;
 }
 
 void ns_send_com_request(ns_client_context_t *context, char *packet) {
@@ -291,8 +291,8 @@ void ns_send_com_request(ns_client_context_t *context, char *packet) {
   memcpy(&out_buffer[1], packet, NS_KEY_LENGTH+NS_IDENTITY_LENGTH);
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &context->peer_addr->addr.sa, context->peer_addr->size);
-  context->state = NS_STATE_COM_REQUEST;
+        &context->peer->addr.addr.sa, context->peer->addr.size);
+  context->peer->state = NS_STATE_COM_REQUEST;
   log_debug("sent com request to peer.");
 }
 
@@ -305,7 +305,7 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
   
   char dec_packet[NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH];
   
-  decrypt((u_char*) context->client_ns_key, (u_char*) &packet[1],
+  decrypt((u_char*) context->key, (u_char*) &packet[1],
         (u_char*) dec_packet, sizeof(dec_packet), NS_RIN_KEY_LENGTH);
   
   /* Get values from the decrypted packet */
@@ -320,7 +320,7 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
   
   if(ns_verify_nonce(nonce) == 0) {
     context->handler->store_key(partner_identity, com_key);
-    context->state = NS_STATE_KEY_RESPONSE;
+    context->peer->state = NS_STATE_KEY_RESPONSE;
     log_debug("received new key from server.");
     ns_send_com_request(context, partner_packet);
   } else {
@@ -335,16 +335,16 @@ void ns_send_com_response(ns_client_context_t *context, char *altered_nonce) {
   out_buffer[0] = NS_STATE_COM_RESPONSE;
   char key[NS_KEY_LENGTH] = { 0 };
   
-  context->handler->get_key(context->peer_identity, key);
+  context->handler->get_key(context->peer->identity, key);
   
   encrypt((u_char*) key, (u_char*) altered_nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
       
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &context->peer_addr->addr.sa, context->peer_addr->size);
+        &context->peer->addr.addr.sa, context->peer->addr.size);
         
   log_info("sent com response, process completed.");
-  context->state = NS_STATE_FINISHED;
+  context->peer->state = NS_STATE_FINISHED;
 }
 
 void ns_handle_com_challenge(ns_client_context_t *context, char *in_buffer) {
@@ -360,33 +360,43 @@ int ns_get_key(ns_client_handler_t handler,
       int server_port, int client_port, int partner_port,
       char *client_identity, char *partner_identity, char *key) {
 
+
   ns_client_context_t context;
-  ns_abstract_address_t server, peer, tmp;
-  context.server_addr = &server;
-  context.peer_addr = &peer;
-  context.state = NS_STATE_INITIAL;
+  ns_client_peer_t peer;
+  
+  ns_abstract_address_t server_addr, peer_addr, tmp_addr;
+
+  /* Store client context informations */
   context.handler = &handler;
-  memset(context.peer_identity, 0, NS_IDENTITY_LENGTH);
-  strncpy(context.peer_identity, partner_identity, NS_IDENTITY_LENGTH);
-  memcpy(context.client_ns_key, key, NS_RIN_KEY_LENGTH);
+  context.server_addr = server_addr;
+  context.peer = &peer;
+  
+  memcpy(context.key, key, NS_RIN_KEY_LENGTH);
+  memcpy(context.identity, client_identity, NS_IDENTITY_LENGTH);
+  
+  /* Store peer informations */
+  context.peer->addr = peer_addr;
+  memcpy(context.peer->identity, partner_identity, NS_IDENTITY_LENGTH);
+  context.peer->state = NS_STATE_INITIAL;
   
   /* Must be big enough for all request sizes (longest message is KEY_RESPONSE) */
   char in_buffer[1+NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH] = { 0 };
   
-  resolve_address(server_address, server_port, context.server_addr);
-  resolve_address(partner_address, partner_port, context.peer_addr);
+  resolve_address(server_address, server_port, &context.server_addr);
+  resolve_address(partner_address, partner_port, &context.peer->addr);
   
-  context.socket = ns_bind_socket(client_port, context.server_addr->addr.sa.sa_family);
+  context.socket = ns_bind_socket(client_port, context.server_addr.addr.sa.sa_family);
   
-  ns_send_key_request(&context, client_identity, partner_identity);
+  ns_send_key_request(&context);
   log_debug("sent key request to %s", server_address);
 
-  tmp.size = sizeof(tmp.addr);
+  tmp_addr.size = sizeof(tmp_addr.addr);
 
   /* Exit loop when the process is finished or any error occured */
-  while(context.state != NS_STATE_FINISHED && context.state < NS_ERR_UNKNOWN_ID) {
+  while(context.peer->state != NS_STATE_FINISHED
+        && context.peer->state < NS_ERR_UNKNOWN_ID) {
     // FIXME hier wird die Adresse vom peer verwendet, könnte aber auch vom server kommen
-    recvfrom(context.socket, in_buffer, sizeof(in_buffer), 0, &tmp.addr.sa, &tmp.size);
+    recvfrom(context.socket, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
 
     switch(in_buffer[0]) {
     case NS_STATE_KEY_RESPONSE:
@@ -402,17 +412,17 @@ int ns_get_key(ns_client_handler_t handler,
     case NS_ERR_UNKNOWN_ID:
       log_error("the server doesn't know the given id(s): %s, %s", client_identity,
             partner_identity);
-      context.state = NS_ERR_UNKNOWN_ID;
+      context.peer->state = NS_ERR_UNKNOWN_ID;
       break;
 
     default:
       log_error("received unknown message with code %d", in_buffer[0]);
-      context.state = NS_ERR_UNKNOWN;
+      context.peer->state = NS_ERR_UNKNOWN;
       break;
     }
     
   }
-  context.handler->result(context.state);
+  context.handler->result(context.peer->state);
   
   return 0;
 }

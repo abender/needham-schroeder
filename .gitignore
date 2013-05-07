@@ -1,0 +1,6 @@
+*.o
+*.dSYM
+*.a
+examples/client
+examples/daemon
+examples/server

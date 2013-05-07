@@ -34,6 +34,10 @@ etc. feel free to drop a line at the addresses given above.
 
 This software is published under [MIT License](http://opensource.org/licenses/mit-license.php)
 
-The library uses the UTHash library by Troy D. Hanson, published under [BSD License](http://troydhanson.github.io/uthash/license.html)
-
 Some parts of the code are based on code from [tinydtls](http://tinydtls.sourceforge.net/) by Olaf Bergmann, published under [MIT License](http://opensource.org/licenses/mit-license.php)
+
+Used libraries:
+
+* UTHash library by Troy D. Hanson, published under [BSD License](http://troydhanson.github.io/uthash/license.html)
+* [csiphash](https://github.com/majek/csiphash) published under [MIT License](http://opensource.org/licenses/mit-license.php)
+

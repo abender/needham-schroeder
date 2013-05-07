@@ -39,12 +39,14 @@
 #include "util.h"
 #include "uthash.h"
 
-/* Log levels:
-   0: debug
-   1: info
-   2: warning
-   3: error
-   4: fatal */
+/* LOGGING: Set NS_LOG_LEVEL in "util.h" to the desired level, which can be:
+ *
+ * 0: debug
+ * 1: info
+ * 2: warning
+ * 3: error
+ * 4: fatal
+ */
 
 /* CAUTION: The library currently only supports multiples of 16 for NS_KEY_LENGTH,
  * NS_IDENTITY_LENGTH and NS_NONCE_LENGTH.
@@ -173,17 +175,25 @@ typedef struct {
 } ns_daemon_handler_t;
 
 typedef struct {
-  ns_client_handler_t *handler;
+  ns_abstract_address_t addr;
+  char identity[NS_IDENTITY_LENGTH];
+  char key[NS_KEY_LENGTH];           // Key received from the keyserver
   int state;
+} ns_client_peer_t;
+
+typedef struct {
+  ns_client_peer_t *peer;
+  ns_client_handler_t *handler;
+  ns_abstract_address_t server_addr;
+  
+  char key[NS_RIN_KEY_LENGTH];       // Key provided by the user
+  char identity[NS_IDENTITY_LENGTH]; // Identity provided by the user
+  
   int socket;
-  ns_abstract_address_t *server_addr;
-  ns_abstract_address_t *peer_addr;
-  char client_ns_key[NS_RIN_KEY_LENGTH];
-  char peer_identity[NS_IDENTITY_LENGTH];
 } ns_client_context_t;
 
 typedef struct {
-  UT_hash_handle hh;
+// FIXME  UT_hash_handle hh;
   ns_abstract_address_t addr;
   char nonce[NS_NONCE_LENGTH];
 } ns_daemon_peer_t;
