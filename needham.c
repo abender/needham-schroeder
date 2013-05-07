@@ -33,8 +33,50 @@
 #include <netdb.h>
 
 #include "rin_wrapper.h"
+#include "sha2/sha2.h"
 
 /* -------------------------------- #0 Common ------------------------------ */
+
+/**
+ * Hashes the original nonce and stores NS_NONCE_LENGTH bytes in the buffer
+ * pointed to by \p altered.
+ */
+void alter_nonce(char *original, char *altered) {
+  
+#ifdef NSDEBUG
+  if(NS_NONCE_LENGTH > SHA256_BLOCK_LENGTH) {
+    log_warning("the nonce length (%d) is bigger than the provided hash buffer (%d)",
+          NS_NONCE_LENGTH, SHA256_BLOCK_LENGTH);
+  }
+  if(NS_NONCE_LENGTH > SHA256_DIGEST_LENGTH) {
+    log_warning("the nonce length (%d) is bigger than the sha256 digest (%d)",
+          NS_NONCE_LENGTH, SHA256_DIGEST_LENGTH);
+  }
+#endif
+  
+  char buf[SHA256_BLOCK_LENGTH] = { 0 };
+
+  memcpy(buf, original, NS_NONCE_LENGTH);
+  
+	SHA256_CTX	ctx256;
+	SHA256_Init(&ctx256);
+	SHA256_Update(&ctx256, (unsigned char*) buf, NS_NONCE_LENGTH);
+	SHA256_End(&ctx256, buf);
+	
+  memcpy(altered, buf, NS_NONCE_LENGTH);
+}
+
+int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
+  
+  char altered_nonce[NS_NONCE_LENGTH];
+  alter_nonce(original_nonce, altered_nonce);
+  
+  if(memcmp(altered_nonce, verify_nonce, NS_NONCE_LENGTH) == 0) {
+    return 0;
+  } else {
+    return -1;
+  }
+}
 
 /* Slightly modified version of resolve_address from libtinydtls by Olaf Bergmann
  ( MIT License: http://tinydtls.sourceforge.net/)  */
@@ -130,27 +172,6 @@ int ns_bind_socket(int port, unsigned char family) {
   return s;
 }
 
-/**
- * TODO implement!
- */
-void alter_nonce(char *original, char *altered) {
-  memcpy(altered, original, NS_NONCE_LENGTH);
-}
-
-/**
- * TODO implement!
- */
-int ns_verify_nonce(char *nonce) {
-  return 0;
-}
-
-/**
- * TODO implement!
- */
-int ns_daemon_verify_nonce(ns_daemon_peer_t *peer, char *nonce) {
-  return 0;
-}
-
 /* ------------------------------ #1 NS Server ----------------------------- */
 
 /*
@@ -222,8 +243,11 @@ void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_bu
     encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
         sizeof(r_packet), NS_RIN_KEY_LENGTH);
     
+    char altered_nonce[NS_NONCE_LENGTH] = { 0 };
+    alter_nonce(nonce, altered_nonce);
+    
     int pos = 0;
-    memcpy(s_packet, nonce, NS_NONCE_LENGTH);
+    memcpy(s_packet, altered_nonce, NS_NONCE_LENGTH);
     pos += NS_NONCE_LENGTH;
     memcpy(&s_packet[pos], id_receiver, NS_IDENTITY_LENGTH);
     pos += NS_IDENTITY_LENGTH;
@@ -269,8 +293,7 @@ void ns_server(ns_server_handler_t *handler, int port) {
 
 void ns_send_key_request(ns_client_context_t *context) {
 
-  char nonce[NS_NONCE_LENGTH];
-  random_key(nonce, NS_NONCE_LENGTH);
+  random_key(context->nonce, NS_NONCE_LENGTH);
   
   /* Message Code + Client identity + Partner identity + Nonce */
   char out_buffer[1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH] = { 0 };
@@ -283,7 +306,7 @@ void ns_send_key_request(ns_client_context_t *context) {
   memcpy(&out_buffer[pos], context->peer->identity,
         strnlen(context->peer->identity, NS_IDENTITY_LENGTH));
   pos += NS_IDENTITY_LENGTH;
-  memcpy(&out_buffer[pos], nonce, NS_NONCE_LENGTH);
+  memcpy(&out_buffer[pos], context->nonce, NS_NONCE_LENGTH);
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &context->server_addr.addr.sa, context->server_addr.size);
@@ -305,7 +328,7 @@ void ns_send_com_request(ns_client_context_t *context, char *packet) {
 
 void ns_handle_key_response(ns_client_context_t *context, char *packet) {
 
-  char nonce[NS_NONCE_LENGTH] = { 0 };
+  char altered_nonce[NS_NONCE_LENGTH] = { 0 };
   char partner_identity[NS_IDENTITY_LENGTH] = { 0 };
   char com_key[NS_KEY_LENGTH] = { 0 };
   char partner_packet[NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
@@ -317,7 +340,7 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
   
   /* Get values from the decrypted packet */
   int pos = 0;
-  memcpy(nonce, &dec_packet[pos], NS_NONCE_LENGTH);
+  memcpy(altered_nonce, &dec_packet[pos], NS_NONCE_LENGTH);
   pos += NS_NONCE_LENGTH;
   memcpy(partner_identity, &dec_packet[pos], NS_IDENTITY_LENGTH);
   pos += NS_IDENTITY_LENGTH;
@@ -325,13 +348,14 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
   pos += NS_KEY_LENGTH;
   memcpy(partner_packet, &dec_packet[pos], NS_KEY_LENGTH+NS_IDENTITY_LENGTH);
   
-  if(ns_verify_nonce(nonce) == 0) {
+  if(ns_verify_nonce(context->nonce, altered_nonce) == 0) {
     context->handler->store_key(partner_identity, com_key);
     context->peer->state = NS_STATE_KEY_RESPONSE;
     log_debug("received new key from server.");
     ns_send_com_request(context, partner_packet);
   } else {
     log_fatal("nonce verification failed!");
+    context->peer->state = NS_ERR_NONCE;
   }
   
 }
@@ -446,7 +470,7 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
       
   /* only store the key if the nonce verification failed. otherwise the peer
      will be deleted without storing any credentials */
-  if(ns_daemon_verify_nonce(peer, received_nonce) == 0) {
+  if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
     context->handler->store_key(peer->identity, peer->key);
     log_info("completed ns-handshake and stored new key.");
   }

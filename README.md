@@ -17,11 +17,25 @@ See [wikipedia/Needham-Schroeder_protocol](http://en.wikipedia.org/wiki/Needham%
 * The client will connect to the server and daemon and perform the key exchange.
 * See the examples code and `needham.h` for further informations
 
+It is intended, that the user may choose the lengths for identities, nonces and keys. With the current implementation there are the following limitations:
+
+* All of these 4 values must be multiples of 16. This is due to the blocksize of the used rijndael implementation and missing padding
+* The key length for the Needham-Schroeder process must be exactly 16 due to the used rijndael library. If you want to use other key lengths make sure to overwrite the `encrypt` and `decrypt` functions.
+
+The length definitions can be found in `needham.h`:
+
+    #define NS_KEY_LENGTH 16
+    #define NS_RIN_KEY_LENGTH 16
+    #define NS_IDENTITY_LENGTH 16
+    #define NS_NONCE_LENGTH 16
+
+Where `NS_RIN_KEY_LENGTH` is the key used for the Needham-Schroeder-process itself and `NS_KEY_LENGTH` the negotiated key used later on in some other protocol.
+
 ## Known Flaws / TODOs
 
-* Nonce altering and verification needs to be implemented
-* The library needs to handle lossy networks (TODO implement retransmissions)
+* The library needs to handle lossy networks (implement retransmissions)
 * Compatibility with Contiki-OS is planned for future work
+* Implement padding and other encryption methods
 
 ## Authors and Contact
 
@@ -39,5 +53,5 @@ Some parts of the code are based on code from [tinydtls](http://tinydtls.sourcef
 Used libraries:
 
 * UTHash library by Troy D. Hanson, published under [BSD License](http://troydhanson.github.io/uthash/license.html)
-* [csiphash](https://github.com/majek/csiphash) published under [MIT License](http://opensource.org/licenses/mit-license.php)
+* [SHA256 by Aaron D. Gifford](http://www.aarongifford.com/computers/sha.html) published under BSD License
 

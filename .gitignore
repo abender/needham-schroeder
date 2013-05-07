@@ -1,6 +1,7 @@
 *.o
 *.dSYM
 *.a
+.DS_Store
 examples/client
 examples/daemon
 examples/server

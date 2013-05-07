@@ -73,6 +73,7 @@ typedef enum {
 typedef enum {
   NS_ERR_UNKNOWN_ID = 17,
   NS_ERR_REJECTED,
+  NS_ERR_NONCE,
   NS_ERR_UNKNOWN
 } ns_error_t;
 
@@ -186,6 +187,7 @@ typedef struct {
   
   char key[NS_RIN_KEY_LENGTH];       // Key provided by the user
   char identity[NS_IDENTITY_LENGTH]; // Identity provided by the user
+  char nonce[NS_NONCE_LENGTH];       // Nonce created by the client
   
   int socket;
 } ns_client_context_t;
