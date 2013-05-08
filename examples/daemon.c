@@ -9,15 +9,26 @@ typedef struct {
 
 identity_t *identities = NULL;
 
+/**
+ * store_key may be called more than once, this callback should update the
+ * existing identity if it is already present in the data storage.
+ */
 int store_key(char *identity_name, char *key) {
   
   identity_t *id;
-  id = malloc(sizeof(identity_t));
+  HASH_FIND_STR(identities, identity_name, id);
   
-  memcpy(id->name, identity_name, NS_IDENTITY_LENGTH);
-  memcpy(id->key, key, NS_KEY_LENGTH);
-  
-  HASH_ADD_STR(identities, name, id);
+  /* identity not found, insert a new one */
+  if(id == NULL) {
+    id = malloc(sizeof(identity_t));
+    memcpy(id->name, identity_name, NS_IDENTITY_LENGTH);
+    memcpy(id->key, key, NS_KEY_LENGTH);
+    HASH_ADD_STR(identities, name, id);
+    
+  /* identity was already present, update the key */
+  } else {
+    memcpy(id->key, key, NS_KEY_LENGTH);    
+  }
   return 0;
 }
 

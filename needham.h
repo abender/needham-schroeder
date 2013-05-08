@@ -78,6 +78,7 @@ typedef enum {
   NS_STATE_COM_REQUEST,
   NS_STATE_COM_CHALLENGE,
   NS_STATE_COM_RESPONSE,
+  NS_STATE_COM_CONFIRM,
   NS_STATE_FINISHED
 } ns_state_t;
 
@@ -166,7 +167,9 @@ typedef struct {
 typedef struct {
 
   /**
-   * Callback to store an identity name and its corresponding key.
+   * Callback to store an identity name and its corresponding key. This function
+   * may be called more than once, the user MUST update the key of identity_name
+   * if identity_name is already present.
    *
    * @return
    *  -1 : On any error
@@ -217,6 +220,12 @@ typedef struct {
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_KEY_LENGTH];
   int state;
+  time_t expires;
+
+  /* retransmission vars */  
+  char pkt_buf[NS_KEY_REQUEST_LENGTH];
+  size_t pkt_buf_len;
+  int retransmits;
 } ns_daemon_peer_t;
 
 typedef struct {
@@ -225,6 +234,7 @@ typedef struct {
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_RIN_KEY_LENGTH];
   int socket;
+  int dirty;
 } ns_daemon_context_t;
 
 /**

@@ -46,6 +46,8 @@ void print_identities() {
     for(id = identities; id != NULL; id = id->hh.next) {
       printf("%d - name : %s, key : %s\n", i, id->name, id->key);
     }
+  } else {
+    printf("- no identities stored -\n");
   }
 }
 
@@ -73,7 +75,7 @@ int main(int argc, char **argv) {
         server_address, partner_address, 
         server_port, client_port, partner_port,
         client_identity, partner_identity, key);
-        
+  
   print_identities();
         
   return 0;
