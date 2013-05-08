@@ -33,9 +33,12 @@ Where `NS_RIN_KEY_LENGTH` is the key used for the Needham-Schroeder-process itse
 
 ## Known Flaws / TODOs
 
-* The library needs to handle lossy networks (implement retransmissions)
+* Retransmissions for the daemon (client retransmits already)
+* The daemon needs so send a confirmation message for `NS_STATE_COM_RESPONSE`
+ * If the confirmation is lost the client sends `NS_STATE_COM_RESPONSE` again and the daemon will know that he has to resend the confirmation
 * Compatibility with Contiki-OS is planned for future work
 * Implement padding and other encryption methods
+* Optimize retransmissions (retransmitted packets are built from scratch, maybe it would be better to buffer them)
 
 ## Authors and Contact
 

@@ -32,6 +32,7 @@
 #define _NEEDHAM_SCHROEDER_H_
 
 #include <sys/types.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 
 #include "util.h"
@@ -58,6 +59,17 @@
 #define NS_IDENTITY_LENGTH 16 // Length of global identifiers for communication partners
 #define NS_NONCE_LENGTH 16    // Nonce length used in Needham-Schroeder
 
+#define NS_KEY_REQUEST_LENGTH 1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH
+#define NS_KEY_RESPONSE_LENGTH 1+NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH
+#define NS_COM_REQUEST_LENGTH 1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH
+#define NS_COM_CHALLENGE_LENGTH 1+NS_NONCE_LENGTH
+#define NS_COM_RESPONSE_LENGTH 1+NS_NONCE_LENGTH
+
+#define NS_RETRANSMIT_TIMEOUT 5 // Timeout length for retransmissions in seconds
+
+#define NS_RETRANSMIT_MAX 3     // Maximum retransmissions before NS_ERR_TIMEOUT is thrown.
+                                //  A value of 3 means 4 attempts in total
+
 /* Message codes */
 typedef enum {
   NS_STATE_INITIAL = 0,
@@ -74,6 +86,7 @@ typedef enum {
   NS_ERR_UNKNOWN_ID = 17,
   NS_ERR_REJECTED,
   NS_ERR_NONCE,
+  NS_ERR_TIMEOUT,
   NS_ERR_UNKNOWN
 } ns_error_t;
 
@@ -177,7 +190,12 @@ typedef struct {
   ns_abstract_address_t addr;
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_KEY_LENGTH];           // Key received from the keyserver
+  /* packet buffer for the last sent packet. The biggest packet for the client
+     is the key request packet */
+  char pkt_buf[NS_KEY_REQUEST_LENGTH];
+  size_t pkt_buf_len;
   int state;
+  int retransmits;
 } ns_client_peer_t;
 
 typedef struct {

@@ -291,6 +291,12 @@ void ns_server(ns_server_handler_t *handler, int port) {
 
 /* ------------------------------ #2 NS Client ----------------------------- */
 
+void ns_client_reset_buffer(ns_client_context_t *context) {
+  memset(context->peer->pkt_buf, 0, sizeof(context->peer->pkt_buf));
+  context->peer->pkt_buf_len = 0;
+  context->peer->retransmits = 0;
+}
+
 void ns_send_key_request(ns_client_context_t *context) {
 
   random_key(context->nonce, NS_NONCE_LENGTH);
@@ -310,6 +316,10 @@ void ns_send_key_request(ns_client_context_t *context) {
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &context->server_addr.addr.sa, context->server_addr.size);
+        
+  memcpy(context->peer->pkt_buf, out_buffer, sizeof(out_buffer));
+  context->peer->pkt_buf_len = sizeof(out_buffer);
+        
   context->peer->state = NS_STATE_KEY_REQUEST;
 }
 
@@ -322,6 +332,10 @@ void ns_send_com_request(ns_client_context_t *context, char *packet) {
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &context->peer->addr.addr.sa, context->peer->addr.size);
+        
+  memcpy(context->peer->pkt_buf, out_buffer, sizeof(out_buffer));
+  context->peer->pkt_buf_len = sizeof(out_buffer);
+        
   context->peer->state = NS_STATE_COM_REQUEST;
   log_debug("sent com request to peer.");
 }
@@ -374,6 +388,9 @@ void ns_send_com_response(ns_client_context_t *context, char *altered_nonce) {
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &context->peer->addr.addr.sa, context->peer->addr.size);
         
+  memcpy(context->peer->pkt_buf, out_buffer, sizeof(out_buffer));
+  context->peer->pkt_buf_len = sizeof(out_buffer);
+        
   log_info("sent com response, process completed.");
   context->peer->state = NS_STATE_FINISHED;
 }
@@ -384,6 +401,24 @@ void ns_handle_com_challenge(ns_client_context_t *context, char *in_buffer) {
   alter_nonce(&in_buffer[1], altered_nonce);
   
   ns_send_com_response(context, altered_nonce);
+}
+
+void ns_client_retransmit(ns_client_context_t *context) {
+  
+  ns_abstract_address_t *addr = NULL;
+  
+  switch(context->peer->state) {
+    case NS_STATE_KEY_REQUEST:
+      addr = &context->server_addr;
+      break;
+    default:
+      addr = &context->peer->addr;
+      break;
+  }
+  sendto(context->socket, context->peer->pkt_buf, context->peer->pkt_buf_len,
+        MSG_DONTWAIT, &addr->addr.sa, addr->size);
+        
+  context->peer->retransmits++;
 }
 
 int ns_get_key(ns_client_handler_t handler,
@@ -409,6 +444,9 @@ int ns_get_key(ns_client_handler_t handler,
   context.peer->addr = peer_addr;
   memcpy(context.peer->identity, partner_identity, NS_IDENTITY_LENGTH);
   context.peer->state = NS_STATE_INITIAL;
+  context.peer->retransmits = 0;
+  memset(context.peer->pkt_buf, 0, sizeof(context.peer->pkt_buf));
+  context.peer->pkt_buf_len = 0;
   
   /* Must be big enough for all request sizes (longest message is KEY_RESPONSE) */
   char in_buffer[1+NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH] = { 0 };
@@ -423,35 +461,72 @@ int ns_get_key(ns_client_handler_t handler,
 
   tmp_addr.size = sizeof(tmp_addr.addr);
 
+  fd_set rfds;
+  struct timeval timeout;
+  int sres = 0;
+
+
+
   /* Exit loop when the process is finished or any error occured */
   while(context.peer->state != NS_STATE_FINISHED
         && context.peer->state < NS_ERR_UNKNOWN_ID) {
-    // FIXME hier wird die Adresse vom peer verwendet, könnte aber auch vom server kommen
-    recvfrom(context.socket, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
-
-    switch(in_buffer[0]) {
-    case NS_STATE_KEY_RESPONSE:
-//      memcpy(&context.server_addr->addr, &tmp.addr.sa, tmp.size);
-//      context.server_addr->size = tmp.size;
-      ns_handle_key_response(&context, in_buffer);
-      break;
-      
-    case NS_STATE_COM_CHALLENGE:
-      ns_handle_com_challenge(&context, in_buffer);
-      break;
-      
-    case NS_ERR_UNKNOWN_ID:
-      log_error("the server doesn't know the given id(s): %s, %s", client_identity,
-            partner_identity);
-      context.peer->state = NS_ERR_UNKNOWN_ID;
-      break;
-
-    default:
-      log_error("received unknown message with code %d", in_buffer[0]);
-      context.peer->state = NS_ERR_UNKNOWN;
-      break;
-    }
+          
+    FD_ZERO(&rfds);
+    FD_SET(context.socket, &rfds);          
+    timeout.tv_sec = NS_RETRANSMIT_TIMEOUT;
+    timeout.tv_usec = 0;
     
+    sres = select(context.socket+1, &rfds, 0, 0, &timeout);
+    
+    if(sres < 0) {
+      log_warning("error while waiting for incoming packets: %s", strerror(errno));
+    
+    /* timeout */
+    } else if(sres == 0) {
+      log_debug("timeout while waiting for response");
+      if(context.peer->retransmits >= NS_RETRANSMIT_MAX) {
+        log_info("maximum retransmits reached, canceling negotiation.");
+        context.peer->state = NS_ERR_TIMEOUT;
+        continue;
+      /* retransmit last message */
+      } else {
+        ns_client_retransmit(&context);
+        log_debug("retransmitted last message (%d of %d)",
+              context.peer->retransmits, NS_RETRANSMIT_MAX);
+      }
+    /* new packet arrived, handle it */
+    } else {
+      recvfrom(context.socket, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
+      
+      switch(in_buffer[0]) {
+      case NS_STATE_KEY_RESPONSE:
+        ns_handle_key_response(&context, in_buffer);
+        /* reset buffer and retransmits if this was the message we've been waiting for */
+        if(context.peer->state == NS_STATE_KEY_REQUEST) {
+          ns_client_reset_buffer(&context);
+        }
+        break;
+      
+      case NS_STATE_COM_CHALLENGE:
+        ns_handle_com_challenge(&context, in_buffer);
+        /* reset buffer and retransmits if this was the message we've been waiting for */
+        if(context.peer->state == NS_STATE_COM_REQUEST) {
+          ns_client_reset_buffer(&context);
+        }
+        break;
+
+      case NS_ERR_UNKNOWN_ID:
+        log_error("the server doesn't know the given id(s): %s, %s", client_identity,
+              partner_identity);
+        context.peer->state = NS_ERR_UNKNOWN_ID;
+        break;
+
+      default:
+        log_error("received unknown message with code %d", in_buffer[0]);
+        context.peer->state = NS_ERR_UNKNOWN;
+        break;
+      }
+    }
   }
   context.handler->result(context.peer->state);
   
