@@ -28,6 +28,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <netinet/in.h>
+#include <time.h>
 
 #include "util.h"
 #include "uthash.h"
