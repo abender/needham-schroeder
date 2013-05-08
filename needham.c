@@ -52,7 +52,7 @@ void ns_server(ns_server_handler_t *handler, int port);
 void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_buffer,
   ns_abstract_address_t *peer);
 
-/* Client functions */ #9
+/* Client functions */
 
 int ns_get_key(ns_client_handler_t handler,
       char *server_address, char *partner_address, 
@@ -79,6 +79,23 @@ void ns_client_retransmit(ns_client_context_t *context);
 void ns_client_reset_buffer(ns_client_context_t *context);
 
 /* Daemon functions */
+
+void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key);
+
+void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
+  char *in_buffer);
+
+void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer);
+
+void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
+  char *in_buffer);
+
+void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer);
+
+ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
+  ns_abstract_address_t *peer_addr);
+
+void ns_daemon_cleanup(ns_daemon_context_t *context);
 
 /* -------------------------------- #0 Common ------------------------------ */
 
@@ -594,55 +611,46 @@ void ns_client_reset_buffer(ns_client_context_t *context) {
 
 /* ------------------------------ #3 NS Daemon ----------------------------- */
 
-void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
+void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key) {
   
-  char out_buffer[1];
-  out_buffer[0] = NS_STATE_COM_CONFIRM;
+  ns_daemon_context_t context;
+  context.handler = handler;
+  context.peers = NULL;
+  context.dirty = 0;
+  memcpy(context.key, key, NS_RIN_KEY_LENGTH);
+  memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
+  char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
+  ns_abstract_address_t peer_addr;
+  ns_daemon_peer_t *peer;
 
-  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &peer->addr.addr.sa, peer->addr.size);
-  peer->state = NS_STATE_COM_CONFIRM;
-  log_debug("sent confirmation message.");
-}
+  int s;
+  s = ns_bind_socket(port, AF_INET6);
+  context.socket = s;
+  
+  peer_addr.size = sizeof(peer_addr.addr);
 
-void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
-      char *in_buffer) {
-  
-  char received_nonce[NS_NONCE_LENGTH];
-  
-  decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
-      sizeof(received_nonce), NS_KEY_LENGTH);
-      
-  /* only store the key if the nonce verification failed. otherwise the peer
-     will be deleted without storing any credentials */
-  if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
-    context->handler->store_key(peer->identity, peer->key);
-    ns_send_com_confirm(context, peer);
-    log_info("completed ns-handshake and stored new key.");
+  log_info("daemon running, waiting for com requests.");
+
+  while(1) {
+    /* clean up marked peers */
+    ns_daemon_cleanup(&context);
+    
+    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer_addr.addr.sa, &peer_addr.size);
+
+    peer = ns_find_or_create_peer(&context, &peer_addr);
+    if(!peer) {
+      log_warning("no peer available to handle this request, discarding it.");
+      continue;
+    }
+
+    if(in_buffer[0] == NS_STATE_COM_REQUEST) {
+      ns_handle_com_request(&context, peer, in_buffer);
+    } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
+      ns_handle_com_response(&context, peer, in_buffer);
+    } else {
+      log_error("received unknown packet (code: %d)", in_buffer[0]);
+    }
   }
-
-  /* mark this peer as completed. if the client doesn't send any further message
-     within some time (depending on retransmit timeout and number of retransmits)
-     it will be cleaned up */
-  peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
-  context->dirty = 1;
-}
-
-void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
-  
-  char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
-
-  out_buffer[0] = NS_STATE_COM_CHALLENGE;
-  
-  random_key(peer->nonce, NS_NONCE_LENGTH);
-  
-  encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LENGTH, NS_KEY_LENGTH);
-  
-  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &peer->addr.addr.sa, peer->addr.size);
-  peer->state = NS_STATE_COM_CHALLENGE;
-  log_debug("Sent com challenge to peer.");
 }
 
 void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
@@ -668,6 +676,57 @@ void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
 #endif
   
   ns_send_com_challenge(context, peer);
+}
+
+void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
+  
+  char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
+
+  out_buffer[0] = NS_STATE_COM_CHALLENGE;
+  
+  random_key(peer->nonce, NS_NONCE_LENGTH);
+  
+  encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
+      NS_NONCE_LENGTH, NS_KEY_LENGTH);
+  
+  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
+        &peer->addr.addr.sa, peer->addr.size);
+  peer->state = NS_STATE_COM_CHALLENGE;
+  log_debug("Sent com challenge to peer.");
+}
+
+void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
+      char *in_buffer) {
+  
+  char received_nonce[NS_NONCE_LENGTH];
+  
+  decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
+      sizeof(received_nonce), NS_KEY_LENGTH);
+      
+  /* only store the key if the nonce verification failed. otherwise the peer
+     will be deleted without storing any credentials */
+  if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
+    context->handler->store_key(peer->identity, peer->key);
+    ns_send_com_confirm(context, peer);
+    log_info("completed ns-handshake and stored new key.");
+  }
+
+  /* mark this peer as completed. if the client doesn't send any further message
+     within some time (depending on retransmit timeout and number of retransmits)
+     it will be cleaned up */
+  peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
+  context->dirty = 1;
+}
+
+void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
+  
+  char out_buffer[1];
+  out_buffer[0] = NS_STATE_COM_CONFIRM;
+
+  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
+        &peer->addr.addr.sa, peer->addr.size);
+  peer->state = NS_STATE_COM_CONFIRM;
+  log_debug("sent confirmation message.");
 }
 
 /**
@@ -725,47 +784,4 @@ void ns_daemon_cleanup(ns_daemon_context_t *context) {
     }
     context->dirty = 0;
   }
-}
-
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key) {
-  
-  ns_daemon_context_t context;
-  context.handler = handler;
-  context.peers = NULL;
-  context.dirty = 0;
-  memcpy(context.key, key, NS_RIN_KEY_LENGTH);
-  memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
-  char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
-  ns_abstract_address_t peer_addr;
-  ns_daemon_peer_t *peer;
-
-  int s;
-  s = ns_bind_socket(port, AF_INET6);
-  context.socket = s;
-  
-  peer_addr.size = sizeof(peer_addr.addr);
-
-  log_info("daemon running, waiting for com requests.");
-
-  while(1) {
-    /* clean up marked peers */
-    ns_daemon_cleanup(&context);
-    
-    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer_addr.addr.sa, &peer_addr.size);
-
-    peer = ns_find_or_create_peer(&context, &peer_addr);
-    if(!peer) {
-      log_warning("no peer available to handle this request, discarding it.");
-      continue;
-    }
-
-    if(in_buffer[0] == NS_STATE_COM_REQUEST) {
-      ns_handle_com_request(&context, peer, in_buffer);
-    } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
-      ns_handle_com_response(&context, peer, in_buffer);
-    } else {
-      log_error("received unknown packet (code: %d)", in_buffer[0]);
-    }
-  }
-
 }

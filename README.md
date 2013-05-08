@@ -31,12 +31,12 @@ The length definitions can be found in `needham.h`:
 
 Where `NS_RIN_KEY_LENGTH` is the key used for the Needham-Schroeder-process itself and `NS_KEY_LENGTH` the negotiated key used later on in some other protocol.
 
+The NS-client performs retransmissions to deal with lossy networks. To adjust its parameters change `NS_RETRANSMIT_TIMEOUT` and `NS_RETRANSMIT_MAX` accordingly.
+
 ## Known Flaws / TODOs
 
-* Retransmissions for the daemon (client retransmits already)
 * Compatibility with Contiki-OS is planned for future work
 * Implement padding and other encryption methods
-* Optimize retransmissions (retransmitted packets are built from scratch, maybe it would be better to buffer them)
 * Vary the timeout of retransmissions (It could be possible that 2 clients try to send over the same medium exactly the same time and the packets collide each time)
 
 ## Authors and Contact

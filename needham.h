@@ -21,12 +21,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
- 
-/**
- * TODOs
- *  - Implement retransmissions to handle lossy networks
- *  - Compatibility with Contiki-OS
- */
 
 #ifndef _NEEDHAM_SCHROEDER_H_
 #define _NEEDHAM_SCHROEDER_H_
@@ -69,38 +63,7 @@
 
 #define NS_RETRANSMIT_MAX 3     // Maximum retransmissions before NS_ERR_TIMEOUT is thrown.
                                 //  A value of 3 means 4 attempts in total
-
-/* Message codes */
-typedef enum {
-  NS_STATE_INITIAL = 0,
-  NS_STATE_KEY_REQUEST,
-  NS_STATE_KEY_RESPONSE,
-  NS_STATE_COM_REQUEST,
-  NS_STATE_COM_CHALLENGE,
-  NS_STATE_COM_RESPONSE,
-  NS_STATE_COM_CONFIRM,
-  NS_STATE_FINISHED
-} ns_state_t;
-
-/* Message error codes */
-typedef enum {
-  NS_ERR_UNKNOWN_ID = 17,
-  NS_ERR_REJECTED,
-  NS_ERR_NONCE,
-  NS_ERR_TIMEOUT,
-  NS_ERR_UNKNOWN
-} ns_error_t;
-
-/* IPv4/IPv6 Address abstraction */
-typedef struct {
-  socklen_t size;
-  union {
-    struct sockaddr     sa;
-    struct sockaddr_storage st;
-    struct sockaddr_in  sin;
-    struct sockaddr_in6 sin6;
-  } addr;
-} ns_abstract_address_t;
+                                
 
 /**
  * These callbacks are used to provide an interface for the server so the user
@@ -189,6 +152,38 @@ typedef struct {
   
 } ns_daemon_handler_t;
 
+/* Message codes */
+typedef enum {
+  NS_STATE_INITIAL = 0,
+  NS_STATE_KEY_REQUEST,
+  NS_STATE_KEY_RESPONSE,
+  NS_STATE_COM_REQUEST,
+  NS_STATE_COM_CHALLENGE,
+  NS_STATE_COM_RESPONSE,
+  NS_STATE_COM_CONFIRM,
+  NS_STATE_FINISHED
+} ns_state_t;
+
+/* Message error codes */
+typedef enum {
+  NS_ERR_UNKNOWN_ID = 17,
+  NS_ERR_REJECTED,
+  NS_ERR_NONCE,
+  NS_ERR_TIMEOUT,
+  NS_ERR_UNKNOWN
+} ns_error_t;
+
+/* IPv4/IPv6 Address abstraction */
+typedef struct {
+  socklen_t size;
+  union {
+    struct sockaddr     sa;
+    struct sockaddr_storage st;
+    struct sockaddr_in  sin;
+    struct sockaddr_in6 sin6;
+  } addr;
+} ns_abstract_address_t;
+
 typedef struct {
   ns_abstract_address_t addr;
   char identity[NS_IDENTITY_LENGTH];
@@ -221,11 +216,6 @@ typedef struct {
   char key[NS_KEY_LENGTH];
   int state;
   time_t expires;
-
-  /* retransmission vars */  
-  char pkt_buf[NS_KEY_REQUEST_LENGTH];
-  size_t pkt_buf_len;
-  int retransmits;
 } ns_daemon_peer_t;
 
 typedef struct {
