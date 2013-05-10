@@ -742,7 +742,7 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
   /* mark this peer as completed. if the client doesn't send any further message
      within some time (depending on retransmit timeout and number of retransmits)
      it will be cleaned up */
-  peer->expires = time(NULL) + 4; // FIXME (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2)
+  peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
 }
 
 void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
@@ -769,7 +769,6 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   
   HASH_FIND(hh, context->peers, peer_addr, sizeof(ns_abstract_address_t), peer);
   if(peer) {
-    log_debug("found existing peer");
     return peer;
   }
   
@@ -787,7 +786,7 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   ns_daemon_reset_peer(peer);
   
   HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
-  log_debug("added new peer");
+  log_debug("created new peer");
   
   return peer;
 }
@@ -804,11 +803,10 @@ void ns_daemon_reset_peer(ns_daemon_peer_t *peer) {
 void ns_daemon_cleanup(ns_daemon_context_t *context) {
   
   ns_daemon_peer_t *peer, *tmp;
-    
+
   HASH_ITER(hh, context->peers, peer, tmp) {
     /* peer is marked to be deleted and live time expired */
     if(peer->expires != 0 && peer->expires < time(NULL)) {
-      log_debug("freed peer: %s", peer->identity);
       HASH_DEL(context->peers, peer);
       free(peer);
     }
