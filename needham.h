@@ -225,7 +225,6 @@ typedef struct {
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_RIN_KEY_LENGTH];
   int socket;
-  int dirty;
 } ns_daemon_context_t;
 
 /**

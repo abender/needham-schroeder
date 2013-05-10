@@ -33,9 +33,10 @@ Where `NS_RIN_KEY_LENGTH` is the key used for the Needham-Schroeder-process itse
 
 The NS-client performs retransmissions to deal with lossy networks. To adjust its parameters change `NS_RETRANSMIT_TIMEOUT` and `NS_RETRANSMIT_MAX` accordingly.
 
-## Known Flaws / TODOs
+## TODOs
 
-* Implement tests!!
+* Implement tests!
+* Signal handling
 * Compatibility with Contiki-OS is planned for future work
 * Implement padding and other encryption methods
 * Vary the timeout of retransmissions (It could be possible that 2 clients try to send over the same medium exactly the same time and the packets collide each time)

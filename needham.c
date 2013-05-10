@@ -45,6 +45,8 @@ int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved)
 
 int ns_bind_socket(int port, unsigned char family);
 
+char* ns_state_to_str(int state);
+
 /* Server functions */
 
 void ns_server(ns_server_handler_t *handler, int port);
@@ -94,6 +96,8 @@ void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer);
 
 ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   ns_abstract_address_t *peer_addr);
+
+void ns_daemon_reset_peer(ns_daemon_peer_t *peer);
 
 void ns_daemon_cleanup(ns_daemon_context_t *context);
 
@@ -236,6 +240,25 @@ int ns_bind_socket(int port, unsigned char family) {
     exit(-1);
   }
   return s;
+}
+
+char* ns_state_to_str(int state) {
+  switch(state) {
+    case NS_STATE_INITIAL: return "NS_STATE_INITIAL"; break;
+    case NS_STATE_KEY_REQUEST: return "NS_STATE_KEY_REQUEST"; break;
+    case NS_STATE_KEY_RESPONSE: return "NS_STATE_KEY_RESPONSE"; break;
+    case NS_STATE_COM_REQUEST: return "NS_STATE_COM_REQUEST"; break;
+    case NS_STATE_COM_CHALLENGE: return "NS_STATE_COM_CHALLENGE"; break;
+    case NS_STATE_COM_RESPONSE: return "NS_STATE_COM_RESPONSE"; break;
+    case NS_STATE_COM_CONFIRM: return "NS_STATE_COM_CONFIRM"; break;
+    case NS_STATE_FINISHED: return "NS_STATE_FINISHED"; break;
+    case NS_ERR_UNKNOWN_ID: return "NS_ERR_UNKNOWN_ID"; break;
+    case NS_ERR_REJECTED: return "NS_ERR_REJECTED"; break;
+    case NS_ERR_NONCE: return "NS_ERR_NONCE"; break;
+    case NS_ERR_TIMEOUT: return "NS_ERR_TIMEOUT"; break;
+    case NS_ERR_UNKNOWN: return "NS_ERR_UNKNOWN"; break;
+    default: return "undefined"; break;
+  }
 }
 
 /* ------------------------------ #1 NS Server ----------------------------- */
@@ -545,6 +568,8 @@ void ns_send_com_request(ns_client_context_t *context, char *packet) {
 
 void ns_handle_com_challenge(ns_client_context_t *context, char *in_buffer) {
   
+  log_debug("received com challenge");
+  
   char dec_nonce[NS_NONCE_LENGTH] = { 0 };
   
   decrypt((u_char*) context->peer->key, (u_char*) &in_buffer[1],
@@ -616,7 +641,6 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
   ns_daemon_context_t context;
   context.handler = handler;
   context.peers = NULL;
-  context.dirty = 0;
   memcpy(context.key, key, NS_RIN_KEY_LENGTH);
   memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
   char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
@@ -632,10 +656,11 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
   log_info("daemon running, waiting for com requests.");
 
   while(1) {
-    /* clean up marked peers */
-    ns_daemon_cleanup(&context);
     
     recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer_addr.addr.sa, &peer_addr.size);
+
+    /* clean up marked peers */
+    ns_daemon_cleanup(&context);
 
     peer = ns_find_or_create_peer(&context, &peer_addr);
     if(!peer) {
@@ -644,6 +669,9 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
     }
 
     if(in_buffer[0] == NS_STATE_COM_REQUEST) {
+      /* The old peer struct could still be in memory, since this is a new
+         negotiation we need to reset its values. */
+      ns_daemon_reset_peer(peer);
       ns_handle_com_request(&context, peer, in_buffer);
     } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
       ns_handle_com_response(&context, peer, in_buffer);
@@ -714,8 +742,7 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
   /* mark this peer as completed. if the client doesn't send any further message
      within some time (depending on retransmit timeout and number of retransmits)
      it will be cleaned up */
-  peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
-  context->dirty = 1;
+  peer->expires = time(NULL) + 4; // FIXME (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2)
 }
 
 void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
@@ -757,11 +784,7 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   
   /* ok, we have enough memory and a newly created peer, initialize it with data */
   memcpy(&peer->addr, peer_addr, sizeof(*peer_addr));
-  memset(&peer->nonce, 0, NS_NONCE_LENGTH);
-  memset(&peer->identity, 0, NS_IDENTITY_LENGTH);
-  memset(&peer->key, 0, NS_KEY_LENGTH);
-  peer->expires = 0;
-  peer->state = NS_STATE_COM_REQUEST;
+  ns_daemon_reset_peer(peer);
   
   HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
   log_debug("added new peer");
@@ -769,19 +792,25 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   return peer;
 }
 
+void ns_daemon_reset_peer(ns_daemon_peer_t *peer) {
+  
+  memset(&peer->nonce, 0, NS_NONCE_LENGTH);
+  memset(&peer->identity, 0, NS_IDENTITY_LENGTH);
+  memset(&peer->key, 0, NS_KEY_LENGTH);
+  peer->expires = 0;
+  peer->state = NS_STATE_COM_REQUEST;
+}
+
 void ns_daemon_cleanup(ns_daemon_context_t *context) {
   
-  if(context->dirty == 1) {
+  ns_daemon_peer_t *peer, *tmp;
     
-    ns_daemon_peer_t *peer;
-    
-    for(peer = context->peers; peer != NULL; peer = peer->hh.next) {
-      /* peer is marked to be deleted and live time expired */
-      if(peer->expires != 0 && peer->expires < time(NULL)) {
-        HASH_DEL(context->peers, peer);
-        free(peer);
-      }
+  HASH_ITER(hh, context->peers, peer, tmp) {
+    /* peer is marked to be deleted and live time expired */
+    if(peer->expires != 0 && peer->expires < time(NULL)) {
+      log_debug("freed peer: %s", peer->identity);
+      HASH_DEL(context->peers, peer);
+      free(peer);
     }
-    context->dirty = 0;
   }
 }
