@@ -26,7 +26,7 @@
 
 /* ---------------------------- Random Stuff ------------------------------- */
 
-void random_key(char *dst, size_t length) {
+void ns_random_key(char *dst, size_t length) {
   
   const char key_characters[] = {
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
@@ -40,16 +40,16 @@ void random_key(char *dst, size_t length) {
   FILE *file;
   char line[length];
   
-  file = fopen(RANDOM_PATH, "r");
+  file = fopen(NS_RANDOM_PATH, "r");
   if(file == NULL) {
-    log_fatal("Unable to open \"%s\" which is needed to generate "
-        "random keys.", RANDOM_PATH);
+    ns_log_fatal("Unable to open \"%s\" which is needed to generate "
+        "random keys.", NS_RANDOM_PATH);
     exit(EXIT_FAILURE);
   }
   
   if(fgets(line, length+1, file) == NULL) {
-    log_fatal("Couldn't get enough characters from \"%s\" to "
-      "create the random key.", RANDOM_PATH);
+    ns_log_fatal("Couldn't get enough characters from \"%s\" to "
+      "create the random key.", NS_RANDOM_PATH);
     exit(EXIT_FAILURE);
   }
   
@@ -62,7 +62,7 @@ void random_key(char *dst, size_t length) {
 
 /* ------------------------------- Logging --------------------------------- */
 
-void simple_log(int level, int app_level, char *msg, ...) {
+void ns_simple_log(int level, int app_level, char *msg, ...) {
   
   if(app_level <= level) {
     
@@ -79,7 +79,7 @@ void simple_log(int level, int app_level, char *msg, ...) {
   }
 }
 
-void dump_bytes_to_hex(char *bytes, size_t length) {
+void ns_dump_bytes_to_hex(char *bytes, size_t length) {
   int i;
   for(i = 0; i < length; i++) {
     printf("%02x ", (u_char) bytes[i]);
@@ -87,10 +87,10 @@ void dump_bytes_to_hex(char *bytes, size_t length) {
   printf("\n");
 }
 
-void dump_bytes_to_bin(char *bytes, size_t length) {
+void ns_dump_bytes_to_bin(char *bytes, size_t length) {
   int i;
   for(i = 0; i < length; i++) {
-    dump_byte_to_bin(&bytes[i]);
+    ns_dump_byte_to_bin(&bytes[i]);
     printf(" ");
     if((i != 0) && ((i+1) % 4) == 0) {
       printf("\n");
@@ -99,11 +99,11 @@ void dump_bytes_to_bin(char *bytes, size_t length) {
   printf("\n");
 }
 
-void dump_byte_to_hex(char *b) {
+void ns_dump_byte_to_hex(char *b) {
   printf("%02x\n", *b);
 }
 
-void dump_byte_to_bin(char *b) {
+void ns_dump_byte_to_bin(char *b) {
   int i;
   for(i = 7; i >= 0; i--) {
     printf("%d", ((*b & (1 << i)) != 0));

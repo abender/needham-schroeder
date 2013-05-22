@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef _UTILITIES_
-#define _UTILITIES_
+#ifndef _NS_UTILITIES_
+#define _NS_UTILITIES_
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,12 +33,12 @@
 
 /* ---------------------------- Random Stuff ------------------------------- */
 
-#define RANDOM_PATH "/dev/random"
+#define NS_RANDOM_PATH "/dev/random"
 
 /*
  * Creates a random key of \p length Bytes and stores it in \p dst .
  */
-void random_key(char *dst, size_t length);
+void ns_random_key(char *dst, size_t length);
 
 /* ------------------------------- Logging --------------------------------- */
 
@@ -47,20 +47,20 @@ void random_key(char *dst, size_t length);
 /*
  * Prints \p msg to stdout if \p level is >= "app_level"
  */
-void simple_log(int level, int app_level, char *msg, ...);
+void ns_simple_log(int level, int app_level, char *msg, ...);
 
-#define log_debug(...) simple_log(0, NS_LOG_LEVEL, __VA_ARGS__)
-#define log_info(...) simple_log(1, NS_LOG_LEVEL, __VA_ARGS__)
-#define log_warning(...) simple_log(2, NS_LOG_LEVEL, __VA_ARGS__)
-#define log_error(...) simple_log(3, NS_LOG_LEVEL, __VA_ARGS__)
-#define log_fatal(...) simple_log(4, NS_LOG_LEVEL, __VA_ARGS__)
+#define ns_log_debug(...) ns_simple_log(0, NS_LOG_LEVEL, __VA_ARGS__)
+#define ns_log_info(...) ns_simple_log(1, NS_LOG_LEVEL, __VA_ARGS__)
+#define ns_log_warning(...) ns_simple_log(2, NS_LOG_LEVEL, __VA_ARGS__)
+#define ns_log_error(...) ns_simple_log(3, NS_LOG_LEVEL, __VA_ARGS__)
+#define ns_log_fatal(...) ns_simple_log(4, NS_LOG_LEVEL, __VA_ARGS__)
 
-void dump_bytes_to_hex(char *bytes, size_t length);
+void ns_dump_bytes_to_hex(char *bytes, size_t length);
 
-void dump_bytes_to_bin(char *bytes, size_t length);
+void ns_dump_bytes_to_bin(char *bytes, size_t length);
 
-void dump_byte_to_hex(char *b);
+void ns_dump_byte_to_hex(char *b);
 
-void dump_byte_to_bin(char *b);
+void ns_dump_byte_to_bin(char *b);
 
-#endif // _UTILITIES_
+#endif // _NS_UTILITIES_

@@ -32,7 +32,7 @@
  * Taken from the tinydtls-Lib. ( MIT License, http://tinydtls.sourceforge.net/ )
  */
 void 
-dump(unsigned char *buf, size_t len) {
+ns_dump(unsigned char *buf, size_t len) {
   printf("\t");
   size_t i = 0;
   while (i < len) {
@@ -45,16 +45,16 @@ dump(unsigned char *buf, size_t len) {
   printf("\n");
 }
 
-int encrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
+int ns_encrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
   
   if(key_length != 16) {
-    log_warning("rijndael key_length != 16 which will likely lead to an Bus error or "
+    ns_log_warning("rijndael key_length != 16 which will likely lead to an Bus error or "
         "segmentation fault!");
   }
   
-  if(length % BLOCK_SIZE != 0) {
-    log_warning("The length of the src must be a multiple of BLOCK_SIZE "
-    "(which is %d) but is %d.", BLOCK_SIZE, length);
+  if(length % NS_BLOCK_SIZE != 0) {
+    ns_log_warning("The length of the src must be a multiple of NS_BLOCK_SIZE "
+    "(which is %d) but is %d.", NS_BLOCK_SIZE, length);
   }
   
   rijndael_ctx ctx;
@@ -63,38 +63,38 @@ int encrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_len
   int j;
   
   // Encrypt blockwise from src to dst.
-  for(j = 0; j < length; j += BLOCK_SIZE) { 
+  for(j = 0; j < length; j += NS_BLOCK_SIZE) { 
     rijndael_encrypt(&ctx, &(src[j]), &(dst[j])); 
   }
   
   return 0;
 }
 
-int encrypt_pkcs7(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
+int ns_encrypt_pkcs7(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
   
-  if(length % BLOCK_SIZE != 0) { // padding required.
-    size_t padded_length = length + BLOCK_SIZE - (length % BLOCK_SIZE);
+  if(length % NS_BLOCK_SIZE != 0) { // padding required.
+    size_t padded_length = length + NS_BLOCK_SIZE - (length % NS_BLOCK_SIZE);
     u_char padded_src[padded_length];
     memcpy(padded_src, src, length);
     memset(&padded_src[length], (padded_length - length), padded_length - length);
-    return encrypt(key, padded_src, dst, padded_length, key_length);
+    return ns_encrypt(key, padded_src, dst, padded_length, key_length);
     
   } else { // no padding required, normal encryption
-    return encrypt(key, src, dst, length, key_length);
+    return ns_encrypt(key, src, dst, length, key_length);
   }
   
 }
 
-int decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
+int ns_decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length) {
   
   if(key_length != 16) {
-    log_warning("rijndael key_length != 16 which will likely lead to an Bus error or "
+    ns_log_warning("rijndael key_length != 16 which will likely lead to an Bus error or "
         "segmentation fault!");
   }
   
-  if(length % BLOCK_SIZE != 0) {
-    log_warning("The length of the src must be a multiple of BLOCK_SIZE "
-    "(which is %d) but is %d.", BLOCK_SIZE, length);
+  if(length % NS_BLOCK_SIZE != 0) {
+    ns_log_warning("The length of the src must be a multiple of NS_BLOCK_SIZE "
+    "(which is %d) but is %d.", NS_BLOCK_SIZE, length);
   }
   
   rijndael_ctx ctx;
@@ -103,7 +103,7 @@ int decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_len
   int j;
   
   // Decrypt blockwise from src to dst.
-  for(j = 0; j < length; j += BLOCK_SIZE) { 
+  for(j = 0; j < length; j += NS_BLOCK_SIZE) { 
     rijndael_decrypt(&ctx, &(src[j]), &(dst[j])); 
   }
   
@@ -113,7 +113,7 @@ int decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_len
 /**
  * Encrypts and decrypts a text.
  */
-int test_encryption() {
+int ns_test_encryption() {
   
   int BUFF_SIZE = 40;
                  
@@ -131,13 +131,13 @@ int test_encryption() {
   memset(buf1, 0, sizeof(buf1));
   memset(buf2, 0, sizeof(buf2));
   
-  encrypt(C_KEY, C_TEXT, buf1, sizeof(C_TEXT), sizeof(C_KEY));
+  ns_encrypt(C_KEY, C_TEXT, buf1, sizeof(C_TEXT), sizeof(C_KEY));
   
-  dump(buf1, BUFF_SIZE);
+  ns_dump(buf1, BUFF_SIZE);
 
-  decrypt(C_KEY, buf1, buf2, sizeof(C_TEXT), sizeof(C_KEY));
+  ns_decrypt(C_KEY, buf1, buf2, sizeof(C_TEXT), sizeof(C_KEY));
   
-  dump(buf2, BUFF_SIZE);
+  ns_dump(buf2, BUFF_SIZE);
   
   return 0;
 }

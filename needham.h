@@ -268,4 +268,10 @@ int ns_get_key(ns_client_handler_t handler,
       int server_port, int client_port, int partner_port,
       char *client_identity, char *partner_identity, char *key);
 
+/**
+ * Returns the corresponding name for the given message code. (see ns_state_t,
+ * ns_error_t) 0 -> "NS_STATE_INITIAL" etc.
+ */
+char* ns_state_to_str(int state);
+
 #endif // _NEEDHAM_SCHROEDER_H_

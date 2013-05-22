@@ -35,7 +35,8 @@ int get_key(char *identity_name, char *key) {
 }
 
 int result(int code) {
-  printf("needham-schroeder finished its negotiation with exit code %d.\n", code);
+  printf("needham-schroeder finished its negotiation with exit code %s.\n",
+        ns_state_to_str(code));
   return 0;
 }
 

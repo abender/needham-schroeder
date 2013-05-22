@@ -107,11 +107,11 @@ void ns_alter_nonce(char *original, char *altered) {
   
 #ifdef NSDEBUG
   if(NS_NONCE_LENGTH > SHA256_BLOCK_LENGTH) {
-    log_warning("the nonce length (%d) is bigger than the provided hash buffer (%d)",
+    ns_log_warning("the nonce length (%d) is bigger than the provided hash buffer (%d)",
           NS_NONCE_LENGTH, SHA256_BLOCK_LENGTH);
   }
   if(NS_NONCE_LENGTH > SHA256_DIGEST_LENGTH) {
-    log_warning("the nonce length (%d) is bigger than the sha256 digest (%d)",
+    ns_log_warning("the nonce length (%d) is bigger than the sha256 digest (%d)",
           NS_NONCE_LENGTH, SHA256_DIGEST_LENGTH);
   }
 #endif
@@ -137,12 +137,12 @@ int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
     return 0;
   } else {
 #ifdef NSDEBUG
-    log_debug("--------------------");
-    log_debug("nonce verification failed, my altered nonce is:");
-    dump_bytes_to_hex(altered_nonce, NS_NONCE_LENGTH);
-    log_debug("but the received nonce is:");
-    dump_bytes_to_hex(verify_nonce, NS_NONCE_LENGTH);
-    log_debug("--------------------");
+    ns_log_debug("--------------------");
+    ns_log_debug("nonce verification failed, my altered nonce is:");
+    ns_dump_bytes_to_hex(altered_nonce, NS_NONCE_LENGTH);
+    ns_log_debug("but the received nonce is:");
+    ns_dump_bytes_to_hex(verify_nonce, NS_NONCE_LENGTH);
+    ns_log_debug("--------------------");
 #endif
     return -1;
   }
@@ -171,7 +171,7 @@ ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
   error = getaddrinfo(addrstr, "", &hints, &res);
 
   if (error != 0) {
-    log_fatal("getaddrinfo: %s\n", gai_strerror(error));
+    ns_log_fatal("getaddrinfo: %s\n", gai_strerror(error));
     return error;
   }
 
@@ -203,7 +203,7 @@ int ns_bind_socket(int port, unsigned char family) {
   s = socket(family, SOCK_DGRAM, 0);
   
   if(s < 0) {
-    log_fatal("Could not create socket: %s", strerror(errno));
+    ns_log_fatal("Could not create socket: %s", strerror(errno));
     exit(-1);
   }
   
@@ -217,7 +217,7 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin6_addr = in6addr_any;
     /* FIXME cleanup */
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
-      log_fatal("Could not bind socket: %s", strerror(errno));
+      ns_log_fatal("Could not bind socket: %s", strerror(errno));
       exit(-1);
     }
     
@@ -231,12 +231,12 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     /* FIXME cleanup */
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
-      log_fatal("Could not bind socket: %s", strerror(errno));
+      ns_log_fatal("Could not bind socket: %s", strerror(errno));
       exit(-1);
     }
     
   } else {
-    log_fatal("unkown address family: %s", family);
+    ns_log_fatal("unkown address family: %s", family);
     exit(-1);
   }
   return s;
@@ -273,7 +273,7 @@ void ns_server(ns_server_handler_t *handler, int port) {
   
   peer.size = sizeof(peer.addr);
 
-  log_info("Server running, waiting for key requests.");
+  ns_log_info("Server running, waiting for key requests.");
 
   while(1) {
     recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer.addr.sa, &peer.size);
@@ -311,7 +311,7 @@ void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_bu
   pos += NS_IDENTITY_LENGTH;
   memcpy(&nonce, &in_buffer[pos], NS_NONCE_LENGTH);
   
-  log_info("Received STATE_KEY_REQUEST (Sender-ID: %s, Receiver-ID: %s).",
+  ns_log_info("Received STATE_KEY_REQUEST (Sender-ID: %s, Receiver-ID: %s).",
       id_sender, id_receiver);
   
   get_sender = handler->get_key(id_sender, key_sender);
@@ -321,7 +321,7 @@ void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_bu
   if(get_sender == -1 || get_receiver == -1) {
     char out_buffer[1];
     out_buffer[0] = NS_ERR_UNKNOWN_ID;    
-    log_info("Sent error NS_ERR_UNKNOWN_ID.");
+    ns_log_info("Sent error NS_ERR_UNKNOWN_ID.");
     sendto(socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT, &peer->addr.sa, peer->size);
   
   /* Identities found, send..   {I_a, B, S_k, {S_k, A} K_b} K_a 
@@ -344,13 +344,13 @@ void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_bu
     /* Packet for the sender (excluding the state) */
     char s_packet[NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
     
-    random_key(tmp_key, NS_KEY_LENGTH);
+    ns_random_key(tmp_key, NS_KEY_LENGTH);
     
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
     
     /* Encrypt package for receiver, tmp-key + sender-id */
-    encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
+    ns_encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
         sizeof(r_packet), NS_RIN_KEY_LENGTH);
     
     char altered_nonce[NS_NONCE_LENGTH] = { 0 };
@@ -368,11 +368,11 @@ void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_bu
     out_buffer[0] = NS_STATE_KEY_RESPONSE;
     
     /* Encrypt package for sender */
-    encrypt((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
+    ns_encrypt((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
         sizeof(s_packet), NS_RIN_KEY_LENGTH);
     
     sendto(socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT, &peer->addr.sa, peer->size);
-    log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s )",
+    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s )",
         id_sender, id_receiver, tmp_key);
     
   }
@@ -415,7 +415,7 @@ int ns_get_key(ns_client_handler_t handler,
   context.socket = ns_bind_socket(client_port, context.server_addr.addr.sa.sa_family);
   
   ns_send_key_request(&context);
-  log_debug("sent key request to %s", server_address);
+  ns_log_debug("sent key request to %s", server_address);
 
   tmp_addr.size = sizeof(tmp_addr.addr);
 
@@ -435,19 +435,19 @@ int ns_get_key(ns_client_handler_t handler,
     sres = select(context.socket+1, &rfds, 0, 0, &timeout);
     
     if(sres < 0) {
-      log_warning("error while waiting for incoming packets: %s", strerror(errno));
+      ns_log_warning("error while waiting for incoming packets: %s", strerror(errno));
     
     /* timeout */
     } else if(sres == 0) {
-      log_debug("timeout while waiting for response");
+      ns_log_debug("timeout while waiting for response");
       if(context.peer->retransmits >= NS_RETRANSMIT_MAX) {
-        log_info("maximum retransmits reached, canceling negotiation.");
+        ns_log_info("maximum retransmits reached, canceling negotiation.");
         context.peer->state = NS_ERR_TIMEOUT;
         continue;
       /* retransmit last message */
       } else {
         ns_client_retransmit(&context);
-        log_debug("retransmitted last message (attempt %d of %d)",
+        ns_log_debug("retransmitted last message (attempt %d of %d)",
               context.peer->retransmits, NS_RETRANSMIT_MAX);
       }
     /* new packet arrived, handle it */
@@ -479,13 +479,13 @@ int ns_get_key(ns_client_handler_t handler,
         break;
 
       case NS_ERR_UNKNOWN_ID:
-        log_error("the server doesn't know the given id(s): %s, %s", client_identity,
+        ns_log_error("the server doesn't know the given id(s): %s, %s", client_identity,
               partner_identity);
         context.peer->state = NS_ERR_UNKNOWN_ID;
         break;
 
       default:
-        log_error("received unknown message with code %d", in_buffer[0]);
+        ns_log_error("received unknown message with code %d", in_buffer[0]);
         context.peer->state = NS_ERR_UNKNOWN;
         break;
       }
@@ -498,7 +498,7 @@ int ns_get_key(ns_client_handler_t handler,
 
 void ns_send_key_request(ns_client_context_t *context) {
 
-  random_key(context->nonce, NS_NONCE_LENGTH);
+  ns_random_key(context->nonce, NS_NONCE_LENGTH);
   
   /* Message Code + Client identity + Partner identity + Nonce */
   char out_buffer[1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH] = { 0 };
@@ -527,7 +527,7 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
   
   char dec_packet[NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH];
   
-  decrypt((u_char*) context->key, (u_char*) &packet[1],
+  ns_decrypt((u_char*) context->key, (u_char*) &packet[1],
         (u_char*) dec_packet, sizeof(dec_packet), NS_RIN_KEY_LENGTH);
   
   /* Get values from the decrypted packet */
@@ -544,10 +544,10 @@ void ns_handle_key_response(ns_client_context_t *context, char *packet) {
 //    context->handler->store_key(partner_identity, com_key);
     memcpy(context->peer->key, com_key, NS_KEY_LENGTH);
     context->peer->state = NS_STATE_KEY_RESPONSE;
-    log_debug("received new key from server.");
+    ns_log_debug("received new key from server.");
     ns_send_com_request(context, partner_packet);
   } else {
-    log_fatal("nonce verification failed!");
+    ns_log_fatal("nonce verification failed!");
     context->peer->state = NS_ERR_NONCE;
   }
   
@@ -563,16 +563,16 @@ void ns_send_com_request(ns_client_context_t *context, char *packet) {
   ns_client_send(context, &context->peer->addr, out_buffer, sizeof(out_buffer));
         
   context->peer->state = NS_STATE_COM_REQUEST;
-  log_debug("sent com request to peer.");
+  ns_log_debug("sent com request to peer.");
 }
 
 void ns_handle_com_challenge(ns_client_context_t *context, char *in_buffer) {
   
-  log_debug("received com challenge");
+  ns_log_debug("received com challenge");
   
   char dec_nonce[NS_NONCE_LENGTH] = { 0 };
   
-  decrypt((u_char*) context->peer->key, (u_char*) &in_buffer[1],
+  ns_decrypt((u_char*) context->peer->key, (u_char*) &in_buffer[1],
         (u_char*) dec_nonce, sizeof(dec_nonce), NS_KEY_LENGTH);
   
   char altered_nonce[NS_NONCE_LENGTH] = { 0 };
@@ -586,19 +586,19 @@ void ns_send_com_response(ns_client_context_t *context, char *altered_nonce) {
   char out_buffer[1+NS_NONCE_LENGTH] = { 0 };
   out_buffer[0] = NS_STATE_COM_RESPONSE;
   
-  encrypt((u_char*) context->peer->key, (u_char*) altered_nonce, (u_char*) &out_buffer[1],
+  ns_encrypt((u_char*) context->peer->key, (u_char*) altered_nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
       
   ns_client_send(context, &context->peer->addr, out_buffer, sizeof(out_buffer));
   context->peer->state = NS_STATE_COM_RESPONSE;
-  log_debug("sent com response");
+  ns_log_debug("sent com response");
 }
 
 void ns_handle_com_confirm(ns_client_context_t *context) {
   
   context->handler->store_key(context->peer->identity, context->peer->key);
   context->peer->state = NS_STATE_FINISHED;
-  log_info("received com confirm. process completed.");
+  ns_log_info("received com confirm. process completed.");
 }
 
 void ns_client_send(ns_client_context_t *context, ns_abstract_address_t *dst,
@@ -653,7 +653,7 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
   
   peer_addr.size = sizeof(peer_addr.addr);
 
-  log_info("daemon running, waiting for com requests.");
+  ns_log_info("daemon running, waiting for com requests.");
 
   while(1) {
     
@@ -664,7 +664,7 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
 
     peer = ns_find_or_create_peer(&context, &peer_addr);
     if(!peer) {
-      log_warning("no peer available to handle this request, discarding it.");
+      ns_log_warning("no peer available to handle this request, discarding it.");
       continue;
     }
 
@@ -676,7 +676,7 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
     } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
       ns_handle_com_response(&context, peer, in_buffer);
     } else {
-      log_error("received unknown packet (code: %d)", in_buffer[0]);
+      ns_log_error("received unknown packet (code: %d)", in_buffer[0]);
     }
   }
 }
@@ -686,7 +686,7 @@ void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
   
   char dec_pkt[NS_KEY_LENGTH+NS_IDENTITY_LENGTH];
 
-  decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
+  ns_decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
       sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
     
   /* Temporarily remember the clients credentials, they will be stored via
@@ -700,7 +700,7 @@ void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
   char d_identity[NS_IDENTITY_LENGTH+1] = { 0 };
   memcpy(d_key, peer->key, NS_KEY_LENGTH);
   memcpy(d_identity, peer->identity, NS_IDENTITY_LENGTH);
-  log_debug("received com request. ( Sender-ID: %s, Key: %s )", d_identity, d_key);
+  ns_log_debug("received com request. ( Sender-ID: %s, Key: %s )", d_identity, d_key);
 #endif
   
   ns_send_com_challenge(context, peer);
@@ -712,15 +712,15 @@ void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer)
 
   out_buffer[0] = NS_STATE_COM_CHALLENGE;
   
-  random_key(peer->nonce, NS_NONCE_LENGTH);
+  ns_random_key(peer->nonce, NS_NONCE_LENGTH);
   
-  encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
+  ns_encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
   
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &peer->addr.addr.sa, peer->addr.size);
   peer->state = NS_STATE_COM_CHALLENGE;
-  log_debug("Sent com challenge to peer.");
+  ns_log_debug("Sent com challenge to peer.");
 }
 
 void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
@@ -728,7 +728,7 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
   
   char received_nonce[NS_NONCE_LENGTH];
   
-  decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
+  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
       sizeof(received_nonce), NS_KEY_LENGTH);
       
   /* only store the key if the nonce verification failed. otherwise the peer
@@ -736,7 +736,7 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
   if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
     context->handler->store_key(peer->identity, peer->key);
     ns_send_com_confirm(context, peer);
-    log_info("completed ns-handshake and stored new key.");
+    ns_log_info("completed ns-handshake and stored new key.");
   }
 
   /* mark this peer as completed. if the client doesn't send any further message
@@ -753,7 +753,7 @@ void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
   sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
         &peer->addr.addr.sa, peer->addr.size);
   peer->state = NS_STATE_COM_CONFIRM;
-  log_debug("sent confirmation message.");
+  ns_log_debug("sent confirmation message.");
 }
 
 /**
@@ -777,7 +777,7 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   
   /* propably enough memory available to malloc */
   if(!peer) {
-    log_warning("not enough memory to allocate memory for a new peer.");
+    ns_log_warning("not enough memory to allocate memory for a new peer.");
     return NULL;
   }
   
@@ -786,7 +786,7 @@ ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
   ns_daemon_reset_peer(peer);
   
   HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
-  log_debug("created new peer");
+  ns_log_debug("created new peer");
   
   return peer;
 }

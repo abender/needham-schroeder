@@ -29,16 +29,16 @@
 
 #include <stdlib.h>
 
-#define BLOCK_SIZE 16
+#define NS_BLOCK_SIZE 16
 
-void dump(unsigned char *buf, size_t len);
+void ns_dump(unsigned char *buf, size_t len);
 
 /*
  * Like "encrypt" but adds PKCS7 padding ( http://tools.ietf.org/html/rfc5652#section-6.3 )
  * if needed. Therefore \p dst must be a multiple of BLOCK_SIZE and big enough to hold
  * \p src .
  */
-int encrypt_pkcs7(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
+int ns_encrypt_pkcs7(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
 
 /**
  * Encrypts \p src with \p key. \p dst must have at least the size of \p src.
@@ -51,17 +51,17 @@ int encrypt_pkcs7(u_char *key, u_char *src, u_char *dst, size_t length, size_t k
  * \param key_length Key length in Bytes.(128 Key = 16 Bytes.)
  * \return Zero on success.
  */
-int encrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
+int ns_encrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
 
 /*
  * Like encrypt, but \p src is a ciphertext which will be decrypted and stored
  * in \p dst.
  */
-int decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
+int ns_decrypt(u_char *key, u_char *src, u_char *dst, size_t length, size_t key_length);
 
 /*
  * Just for debugging purposes.
  */
-int test_encryption();
+int ns_test_encryption();
 
 #endif /* _RIN_WRAPPER_H_ */
