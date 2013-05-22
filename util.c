@@ -39,6 +39,7 @@ void ns_random_key(char *dst, size_t length) {
   
   FILE *file;
   char line[length];
+  memset(line, 0, sizeof(char) * sizeof(line));
   
   file = fopen(NS_RANDOM_PATH, "r");
   if(file == NULL) {

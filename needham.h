@@ -229,7 +229,9 @@ typedef struct {
 
 /**
  * Start a needham-schroeder server. The server is waiting for key requests by
- * the client and answers these with newly generated keys.
+ * the client and answers these with newly generated keys. ns_server does NOT
+ * start a new thread in which it is responding to requests. It is up to the
+ * user if the server should be threaded.
  *
  * @param handler Callbacks for the server. See struct description.
  * @param port The port the server should listen on

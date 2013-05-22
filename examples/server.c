@@ -33,6 +33,7 @@ int main(int argc, char **argv) {
   ns_server_handler_t handler = {
     .get_key = get_key
   };
+  
   ns_server(&handler, port);
   
   return 0;

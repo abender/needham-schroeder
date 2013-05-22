@@ -13,4 +13,7 @@ LDLIBS:=-lneedham
 all:	$(EXECUTABLES)
 
 clean:
-	@rm -f $(EXECUTABLES)
+	rm -rf $(EXECUTABLES)
+	for exe in $(EXECUTABLES) ; do \
+		rm -rf $(addsuffix .dSYM,$$exe) ; \
+	done

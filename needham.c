@@ -595,7 +595,7 @@ void ns_send_com_response(ns_client_context_t *context, char *altered_nonce) {
 }
 
 void ns_handle_com_confirm(ns_client_context_t *context) {
-  
+
   context->handler->store_key(context->peer->identity, context->peer->key);
   context->peer->state = NS_STATE_FINISHED;
   ns_log_info("received com confirm. process completed.");
@@ -645,6 +645,7 @@ void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key
   memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
   char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
   ns_abstract_address_t peer_addr;
+  memset(&peer_addr, 0, sizeof(ns_abstract_address_t));
   ns_daemon_peer_t *peer;
 
   int s;

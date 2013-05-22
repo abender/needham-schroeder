@@ -10,9 +10,9 @@ typedef struct {
 identity_t *identities = NULL;
 
 int store_key(char *identity_name, char *key) {
-  
   identity_t *id;
   id = malloc(sizeof(identity_t));
+  memset(id, 0, sizeof(identity_t));
   
   memcpy(id->name, identity_name, NS_IDENTITY_LENGTH);
   memcpy(id->key, key, NS_KEY_LENGTH);
@@ -43,9 +43,12 @@ int result(int code) {
 void print_identities() {
   identity_t *id = NULL;
   int i = 0;
+  char tmp_key[NS_KEY_LENGTH+1] = { 0 };
   if(identities) {
     for(id = identities; id != NULL; id = id->hh.next) {
-      printf("%d - name : %s, key : %s\n", i, id->name, id->key);
+      memcpy(tmp_key, id->key, NS_KEY_LENGTH);
+      printf("%d - name : %s, key : %s\n", i, id->name, tmp_key);
+      i++;
     }
   } else {
     printf("- no identities stored -\n");
