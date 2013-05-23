@@ -62,34 +62,12 @@
 #define NS_COM_RESPONSE_LENGTH 1+NS_NONCE_LENGTH
 
 #define NS_DAEMON_BUFFER_SIZE NS_COM_REQUEST_LENGTH
+#define NS_SERVER_BUFFER_SIZE NS_KEY_REQUEST_LENGTH
 
 #define NS_RETRANSMIT_TIMEOUT 5 // Timeout length for retransmissions in seconds
 
 #define NS_RETRANSMIT_MAX 3     // Maximum retransmissions before NS_ERR_TIMEOUT is thrown.
                                 //  A value of 3 means 4 attempts in total
-                                
-
-/**
- * These callbacks are used to provide an interface for the server so the user
- * may decide how the server stores/retrieves keys. (in memory, in a database,...)
- */
-typedef struct {
-  
-  /**
-   * Callback to find an key for \p identity_name and store its key in \p key.
-   *
-   * @param identity_name Pointer to a zero-terminated string, containing the
-   *       name.
-   * @param key The library expects an array of NS_RIN_KEY_LENGTH size and the
-   *       key of the identity stored here.
-   *
-   * @return An integer with the following codes:
-   *  -1 : identity not found
-   *   0 : success
-   */
-  int (*get_key)(char *identity_name, char *key);
-  
-} ns_server_handler_t;
 
 /**
  * These callbacks are used to interface the client. The user may decide how
@@ -189,18 +167,6 @@ typedef struct {
   int socket;
 } ns_client_context_t;
 
-
-/**
- * Start a needham-schroeder server. The server is waiting for key requests by
- * the client and answers these with newly generated keys. ns_server does NOT
- * start a new thread in which it is responding to requests. It is up to the
- * user if the server should be threaded.
- *
- * @param handler Callbacks for the server. See struct description.
- * @param port The port the server should listen on
- */
-void ns_server(ns_server_handler_t *handler, int port);
-
 /**
  * Starts a client which will try to get a new key from the server to
  * securely communicate with some peer.
@@ -227,8 +193,6 @@ int ns_get_key(ns_client_handler_t handler,
  * ns_error_t) 0 -> "NS_STATE_INITIAL" etc.
  */
 char* ns_state_to_str(int state);
-
-
 
 /* -------------------------- Revamp ---------------------- */
 

@@ -45,13 +45,6 @@ int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved)
 
 char* ns_state_to_str(int state);
 
-/* Server functions */
-
-void ns_server(ns_server_handler_t *handler, int port);
-
-void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_buffer,
-  ns_abstract_address_t *peer);
-
 /* Client functions */
 
 int ns_get_key(ns_client_handler_t handler,
@@ -94,6 +87,9 @@ void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer);
 void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer);
 
 void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
+      char *in_buffer, ssize_t len);
+
+void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, ssize_t len);
       
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
@@ -262,123 +258,6 @@ char* ns_state_to_str(int state) {
     case NS_ERR_TIMEOUT: return "NS_ERR_TIMEOUT"; break;
     case NS_ERR_UNKNOWN: return "NS_ERR_UNKNOWN"; break;
     default: return "undefined"; break;
-  }
-}
-
-/* ------------------------------ #1 NS Server ----------------------------- */
-
-void ns_server(ns_server_handler_t *handler, int port) {
-  
-  int s;
-  char in_buffer[1 + 2*NS_IDENTITY_LENGTH + NS_NONCE_LENGTH];
-  ns_abstract_address_t peer;
-  
-  s = ns_bind_socket(port, AF_INET6);
-  
-  peer.size = sizeof(peer.addr);
-
-  ns_log_info("Server running, waiting for key requests.");
-
-  while(1) {
-    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer.addr.sa, &peer.size);
-    
-    if(in_buffer[0] == NS_STATE_KEY_REQUEST) {
-      ns_handle_key_request(handler, s, in_buffer, &peer);      
-    }
-  }
-}
-
-/*
- * Handle a key request coming from \p socket . The packet is stored in \p in_buffer
- * and the sender in \p peer .
- */
-void ns_handle_key_request(ns_server_handler_t *handler, int socket, char *in_buffer,
-      ns_abstract_address_t *peer) {
-  
-  int get_sender, get_receiver;
-  
-  char id_sender[NS_IDENTITY_LENGTH+1];
-  char id_receiver[NS_IDENTITY_LENGTH+1];
-  char key_sender[NS_RIN_KEY_LENGTH+1] = { 0 };
-  char key_receiver[NS_RIN_KEY_LENGTH+1] = { 0 };
-  char nonce[NS_NONCE_LENGTH+1];
-  
-  memset(id_sender, 0, sizeof(id_sender));
-  memset(id_receiver, 0, sizeof(id_receiver));
-  memset(nonce, 0, sizeof(nonce));
-  
-  /* Get values from incoming packet (sender, receiver, nonce) */
-  int pos = 1;
-  memcpy(&id_sender, &in_buffer[1], NS_IDENTITY_LENGTH);
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(&id_receiver, &in_buffer[pos], NS_IDENTITY_LENGTH);
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(&nonce, &in_buffer[pos], NS_NONCE_LENGTH);
-  
-  ns_log_info("Received STATE_KEY_REQUEST (Sender-ID: %s, Receiver-ID: %s).",
-      id_sender, id_receiver);
-  
-  get_sender = handler->get_key(id_sender, key_sender);
-  get_receiver = handler->get_key(id_receiver, key_receiver);
-  
-  /* Identity not found, send ERR_UNKNOWN_ID */
-  if(get_sender == -1 || get_receiver == -1) {
-    char out_buffer[1];
-    out_buffer[0] = NS_ERR_UNKNOWN_ID;    
-    ns_log_info("Sent error NS_ERR_UNKNOWN_ID.");
-    sendto(socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT, &peer->addr.sa, peer->size);
-  
-  /* Identities found, send..   {I_a, B, S_k, {S_k, A} K_b} K_a 
-      1 Byte  : State (STATE_KEY_RESPONSE)
-      encrypted K_s(
-       16 Bytes : Nonce
-       16 Bytes : Identity Receiver
-       16 Bytes : tmp-Key
-       32 Bytes : encrypted K_r(tmp-Key:16, Identity Sender16)
-     ) */
-  } else {
-    /* State + Nonce + 2 Identities + 2 Keys (whole message) */
-    char out_buffer[1 + NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
-    /* Key for sender-receiver communication */
-    char tmp_key[NS_KEY_LENGTH+1] = { 0 };
-    /* tmp_key, identity-sender */
-    char r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
-    /* Encrypted: tmp-key, identity-sender */
-    char enc_r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
-    /* Packet for the sender (excluding the state) */
-    char s_packet[NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
-    
-    ns_random_key(tmp_key, NS_KEY_LENGTH);
-    
-    memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
-    memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
-    
-    /* Encrypt package for receiver, tmp-key + sender-id */
-    ns_encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
-        sizeof(r_packet), NS_RIN_KEY_LENGTH);
-    
-    char altered_nonce[NS_NONCE_LENGTH] = { 0 };
-    ns_alter_nonce(nonce, altered_nonce);
-    
-    int pos = 0;
-    memcpy(s_packet, altered_nonce, NS_NONCE_LENGTH);
-    pos += NS_NONCE_LENGTH;
-    memcpy(&s_packet[pos], id_receiver, NS_IDENTITY_LENGTH);
-    pos += NS_IDENTITY_LENGTH;
-    memcpy(&s_packet[pos], tmp_key, NS_KEY_LENGTH);
-    pos += NS_KEY_LENGTH;
-    memcpy(&s_packet[pos], enc_r_packet, NS_KEY_LENGTH + NS_IDENTITY_LENGTH);
-    
-    out_buffer[0] = NS_STATE_KEY_RESPONSE;
-    
-    /* Encrypt package for sender */
-    ns_encrypt((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
-        sizeof(s_packet), NS_RIN_KEY_LENGTH);
-    
-    sendto(socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT, &peer->addr.sa, peer->size);
-    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s )",
-        id_sender, id_receiver, tmp_key);
-    
   }
 }
 
@@ -640,6 +519,138 @@ void ns_client_reset_buffer(ns_client_context_t *context) {
 
 /* ------------------------------ #4 Revamp ----------------------------- */
 
+/*
+ * Handle a key request coming from \p socket . The packet is stored in \p in_buffer
+ * and the sender in \p peer .
+ */
+void ns_handle_key_request (ns_context_t *context, ns_peer_t *peer,
+       char *in_buffer, ssize_t len) {
+  
+  int get_sender, get_receiver;
+  
+  char id_sender[NS_IDENTITY_LENGTH+1] = { 0 };
+  char id_receiver[NS_IDENTITY_LENGTH+1] = { 0 };
+  char key_sender[NS_RIN_KEY_LENGTH+1] = { 0 };
+  char key_receiver[NS_RIN_KEY_LENGTH+1] = { 0 };
+  char nonce[NS_NONCE_LENGTH+1] = { 0 };
+  
+  memset(id_sender, 0, sizeof(id_sender));
+  memset(id_receiver, 0, sizeof(id_receiver));
+  memset(nonce, 0, sizeof(nonce));
+  
+  /* Get values from incoming packet (sender, receiver, nonce) */
+  int pos = 1;
+  memcpy(&id_sender, &in_buffer[1], NS_IDENTITY_LENGTH);
+  pos += NS_IDENTITY_LENGTH;
+  memcpy(&id_receiver, &in_buffer[pos], NS_IDENTITY_LENGTH);
+  pos += NS_IDENTITY_LENGTH;
+  memcpy(&nonce, &in_buffer[pos], NS_NONCE_LENGTH);
+  
+  ns_log_info("Received STATE_KEY_REQUEST (Sender-ID: %s, Receiver-ID: %s).",
+      id_sender, id_receiver);
+  
+  get_sender = context->handler->get_key(id_sender, key_sender);
+  get_receiver = context->handler->get_key(id_receiver, key_receiver);
+  
+  /* Identity not found, send ERR_UNKNOWN_ID */
+  if(get_sender == -1 || get_receiver == -1) {
+    char out_buffer[1];
+    out_buffer[0] = NS_ERR_UNKNOWN_ID;    
+    ns_log_info("Sent error NS_ERR_UNKNOWN_ID.");
+    
+    context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  
+  /* Identities found, send..   {I_a, B, S_k, {S_k, A} K_b} K_a 
+      1 Byte  : State (STATE_KEY_RESPONSE)
+      encrypted K_s(
+       16 Bytes : Nonce
+       16 Bytes : Identity Receiver
+       16 Bytes : tmp-Key
+       32 Bytes : encrypted K_r(tmp-Key:16, Identity Sender16)
+     ) */
+  } else {
+    /* State + Nonce + 2 Identities + 2 Keys (whole message) */
+    char out_buffer[1 + NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
+    /* Key for sender-receiver communication */
+    char tmp_key[NS_KEY_LENGTH+1] = { 0 };
+    /* tmp_key, identity-sender */
+    char r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
+    /* Encrypted: tmp-key, identity-sender */
+    char enc_r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
+    /* Packet for the sender (excluding the state) */
+    char s_packet[NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
+    
+    ns_random_key(tmp_key, NS_KEY_LENGTH);
+    
+    memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
+    memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
+    
+    /* Encrypt package for receiver, tmp-key + sender-id */
+    ns_encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
+        sizeof(r_packet), NS_RIN_KEY_LENGTH);
+    
+    char altered_nonce[NS_NONCE_LENGTH] = { 0 };
+    ns_alter_nonce(nonce, altered_nonce);
+    
+    int pos = 0;
+    memcpy(s_packet, altered_nonce, NS_NONCE_LENGTH);
+    pos += NS_NONCE_LENGTH;
+    memcpy(&s_packet[pos], id_receiver, NS_IDENTITY_LENGTH);
+    pos += NS_IDENTITY_LENGTH;
+    memcpy(&s_packet[pos], tmp_key, NS_KEY_LENGTH);
+    pos += NS_KEY_LENGTH;
+    memcpy(&s_packet[pos], enc_r_packet, NS_KEY_LENGTH + NS_IDENTITY_LENGTH);
+    
+    out_buffer[0] = NS_STATE_KEY_RESPONSE;
+    
+    /* Encrypt package for sender */
+    ns_encrypt((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
+        sizeof(s_packet), NS_RIN_KEY_LENGTH);
+    
+    context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+    
+    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s )",
+        id_sender, id_receiver, tmp_key);
+    
+  }
+}
+
+void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
+      char *buf, ssize_t len) {
+
+  /* clean up marked peers */
+  ns_cleanup(context);
+
+  ns_peer_t *peer;
+  peer = ns_find_or_create_peer(context, addr);
+  if(!peer) {
+    ns_log_warning("no peer available to handle this request, discarding it.");
+    return;
+  }
+
+  if(ns_discard_invalid_messages(context, buf, len) < 0)
+    return;
+  
+  char code = buf[0];
+
+  /* No switch-case because of Contiki Threads */
+  if(code == NS_STATE_KEY_REQUEST) {
+    ns_handle_key_request(context, peer, buf, len);
+  } else if(code == NS_STATE_KEY_RESPONSE) {
+    ;
+  } else if(code == NS_STATE_COM_REQUEST) {
+    ns_handle_com_request(context, peer, buf, len);
+  } else if(code == NS_STATE_COM_CHALLENGE) {
+    ;
+  } else if(code == NS_STATE_COM_RESPONSE) {
+    ns_handle_com_response(context, peer, buf, len);
+  } else if(code == NS_STATE_COM_CONFIRM) {
+    ;
+  } else {
+    ns_log_warning("this shouldn't be reached at all because of ns_discard_invalid_messages");
+  }
+}
+
 void ns_cleanup(ns_context_t *context) {
   
   ns_peer_t *peer, *tmp;
@@ -799,42 +810,6 @@ void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
      within some time (depending on retransmit timeout and number of retransmits)
      it will be cleaned up */
   peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
-}
-
-void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
-      char *buf, ssize_t len) {
-
-  /* clean up marked peers */
-  ns_cleanup(context);
-
-  ns_peer_t *peer;
-  peer = ns_find_or_create_peer(context, addr);
-  if(!peer) {
-    ns_log_warning("no peer available to handle this request, discarding it.");
-    return;
-  }
-
-  if(ns_discard_invalid_messages(context, buf, len) < 0)
-    return;
-  
-  char code = buf[0];
-
-  /* No switch-case because of Contiki Threads */
-  if(code == NS_STATE_KEY_REQUEST) {
-    ;
-  } else if(code == NS_STATE_KEY_RESPONSE) {
-    ;
-  } else if(code == NS_STATE_COM_REQUEST) {
-    ns_handle_com_request(context, peer, buf, len);
-  } else if(code == NS_STATE_COM_CHALLENGE) {
-    ;
-  } else if(code == NS_STATE_COM_RESPONSE) {
-    ns_handle_com_response(context, peer, buf, len);
-  } else if(code == NS_STATE_COM_CONFIRM) {
-    ;
-  } else {
-    ns_log_warning("this shouldn't be reached at all because of ns_discard_invalid_messages");
-  }
 }
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key) {

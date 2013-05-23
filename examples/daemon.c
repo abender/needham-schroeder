@@ -76,10 +76,12 @@ int main(int argc, char **argv) {
   };
   
   fd = ns_bind_socket(port, AF_INET6);
-  /* Check existing fd */
   
   context = ns_initialize_context(&fd, &handler);
-  /* Check existing context */
+  if(!context) {
+    ns_log_fatal("could not create context.");
+    exit(-1);
+  }
   
   ns_set_credentials(context, identity, key);
   
