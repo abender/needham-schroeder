@@ -43,8 +43,6 @@ int ns_verify_nonce(char *original_nonce, char *verify_nonce);
 
 int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved);
 
-int ns_bind_socket(int port, unsigned char family);
-
 char* ns_state_to_str(int state);
 
 /* Server functions */
@@ -80,26 +78,32 @@ void ns_client_retransmit(ns_client_context_t *context);
   
 void ns_client_reset_buffer(ns_client_context_t *context);
 
-/* Daemon functions */
+/* Revamp */
 
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key);
+void ns_cleanup(ns_context_t *context);
 
-void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
-  char *in_buffer);
+void ns_reset_peer(ns_peer_t *peer);
 
-void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer);
+ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
+      ns_abstract_address_t *peer_addr);
+      
+int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len);
 
-void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
-  char *in_buffer);
+void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer);
 
-void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer);
+void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer);
 
-ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
-  ns_abstract_address_t *peer_addr);
+void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
+      char *in_buffer, ssize_t len);
+      
+void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
+      char *buf, ssize_t len);
+      
+void ns_set_credentials(ns_context_t *context, char *identity, char *key);
 
-void ns_daemon_reset_peer(ns_daemon_peer_t *peer);
+ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler);
 
-void ns_daemon_cleanup(ns_daemon_context_t *context);
+void ns_free_context(ns_context_t *context);
 
 /* -------------------------------- #0 Common ------------------------------ */
 
@@ -634,56 +638,124 @@ void ns_client_reset_buffer(ns_client_context_t *context) {
   context->peer->retransmits = 0;
 }
 
-/* ------------------------------ #3 NS Daemon ----------------------------- */
+/* ------------------------------ #4 Revamp ----------------------------- */
 
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key) {
+void ns_cleanup(ns_context_t *context) {
   
-  ns_daemon_context_t context;
-  context.handler = handler;
-  context.peers = NULL;
-  memcpy(context.key, key, NS_RIN_KEY_LENGTH);
-  memcpy(context.identity, identity, NS_IDENTITY_LENGTH);
-  char in_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
-  ns_abstract_address_t peer_addr;
-  memset(&peer_addr, 0, sizeof(ns_abstract_address_t));
-  ns_daemon_peer_t *peer;
+  ns_peer_t *peer, *tmp;
 
-  int s;
-  s = ns_bind_socket(port, AF_INET6);
-  context.socket = s;
-  
-  peer_addr.size = sizeof(peer_addr.addr);
-
-  ns_log_info("daemon running, waiting for com requests.");
-
-  while(1) {
-    
-    recvfrom(s, in_buffer, sizeof(in_buffer), 0, &peer_addr.addr.sa, &peer_addr.size);
-
-    /* clean up marked peers */
-    ns_daemon_cleanup(&context);
-
-    peer = ns_find_or_create_peer(&context, &peer_addr);
-    if(!peer) {
-      ns_log_warning("no peer available to handle this request, discarding it.");
-      continue;
-    }
-
-    if(in_buffer[0] == NS_STATE_COM_REQUEST) {
-      /* The old peer struct could still be in memory, since this is a new
-         negotiation we need to reset its values. */
-      ns_daemon_reset_peer(peer);
-      ns_handle_com_request(&context, peer, in_buffer);
-    } else if(in_buffer[0] == NS_STATE_COM_RESPONSE) {
-      ns_handle_com_response(&context, peer, in_buffer);
-    } else {
-      ns_log_error("received unknown packet (code: %d)", in_buffer[0]);
+  HASH_ITER(hh, context->peers, peer, tmp) {
+    /* peer is marked to be deleted and live time expired */
+    if(peer->expires != 0 && peer->expires < time(NULL)) {
+      HASH_DEL(context->peers, peer);
+      free(peer);
     }
   }
 }
 
-void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
-      char *in_buffer) {
+void ns_reset_peer(ns_peer_t *peer) {
+  
+  memset(&peer->nonce, 0, NS_NONCE_LENGTH);
+  memset(&peer->identity, 0, NS_IDENTITY_LENGTH);
+  memset(&peer->key, 0, NS_KEY_LENGTH);
+  peer->expires = 0;
+  peer->state = NS_STATE_INITIAL;
+}
+
+/**
+ * Finds or creates a daemon peer for the daemons context.
+ *
+ * @return A pointer to the found or created peer or NULL on any error (which
+ *       propably will be not enough memory in constrained environments)
+ */
+ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
+      ns_abstract_address_t *peer_addr) {
+  
+  ns_peer_t *peer;
+  
+  HASH_FIND(hh, context->peers, peer_addr, sizeof(ns_abstract_address_t), peer);
+  if(peer) {
+    return peer;
+  }
+  
+  /* peer doesn't exist, create and store a new one */
+  peer = (ns_peer_t*) malloc(sizeof(ns_peer_t));
+  
+  /* propably enough memory available to malloc */
+  if(!peer) {
+    ns_log_warning("not enough memory to allocate memory for a new peer.");
+    return NULL;
+  }
+  
+  /* ok, we have enough memory and a newly created peer, initialize it with data */
+  memcpy(&peer->addr, peer_addr, sizeof(*peer_addr));
+  ns_reset_peer(peer);
+  
+  HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
+  ns_log_debug("created new peer");
+  
+  return peer;
+}
+
+/**
+ * Validates the message code and discards messages that don't fit the applications
+ * role.
+ */
+int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len) {
+  
+  char code = buf[0];
+  ns_role_t role = context->role;
+  
+  if(role == NS_ROLE_CLIENT) {
+    if(code == NS_STATE_KEY_RESPONSE || code == NS_STATE_COM_CHALLENGE ||
+       code == NS_STATE_COM_CONFIRM || code == NS_ERR_UNKNOWN_ID ||
+       code == NS_ERR_REJECTED || code == NS_ERR_NONCE)
+       return 0;
+    
+  } else if(role == NS_ROLE_SERVER) {
+    if(code == NS_STATE_KEY_REQUEST)
+      return 0;
+    
+  } else if(role == NS_ROLE_DAEMON) {
+    if(code == NS_STATE_COM_REQUEST || code == NS_STATE_COM_RESPONSE)
+      return 0;
+    
+  } else {
+    ns_log_warning("undefined application role, discarding message! (%d)", role);
+  }
+  ns_log_info("received message with invalid code. (code %d)", code);
+  return -1;
+}
+
+void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer) {
+  
+  char out_buffer[1];
+  out_buffer[0] = NS_STATE_COM_CONFIRM;
+
+  context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  peer->state = NS_STATE_COM_CONFIRM;
+  ns_log_debug("sent confirmation message.");
+}
+
+void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
+  
+  char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
+
+  out_buffer[0] = NS_STATE_COM_CHALLENGE;
+  
+  ns_random_key(peer->nonce, NS_NONCE_LENGTH);
+  
+  ns_encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
+      NS_NONCE_LENGTH, NS_KEY_LENGTH);
+  
+  context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  
+  peer->state = NS_STATE_COM_CHALLENGE;
+  ns_log_debug("Sent com challenge to peer.");
+}
+
+void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
+      char *in_buffer, ssize_t len) {
   
   char dec_pkt[NS_KEY_LENGTH+NS_IDENTITY_LENGTH];
 
@@ -707,32 +779,15 @@ void ns_handle_com_request(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
   ns_send_com_challenge(context, peer);
 }
 
-void ns_send_com_challenge(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
-  
-  char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
-
-  out_buffer[0] = NS_STATE_COM_CHALLENGE;
-  
-  ns_random_key(peer->nonce, NS_NONCE_LENGTH);
-  
-  ns_encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LENGTH, NS_KEY_LENGTH);
-  
-  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &peer->addr.addr.sa, peer->addr.size);
-  peer->state = NS_STATE_COM_CHALLENGE;
-  ns_log_debug("Sent com challenge to peer.");
-}
-
-void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer,
-      char *in_buffer) {
+void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
+      char *in_buffer, ssize_t len) {
   
   char received_nonce[NS_NONCE_LENGTH];
   
   ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
       sizeof(received_nonce), NS_KEY_LENGTH);
       
-  /* only store the key if the nonce verification failed. otherwise the peer
+  /* only store the key if the nonce verification succeded. otherwise the peer
      will be deleted without storing any credentials */
   if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
     context->handler->store_key(peer->identity, peer->key);
@@ -746,70 +801,67 @@ void ns_handle_com_response(ns_daemon_context_t *context, ns_daemon_peer_t *peer
   peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
 }
 
-void ns_send_com_confirm(ns_daemon_context_t *context, ns_daemon_peer_t *peer) {
-  
-  char out_buffer[1];
-  out_buffer[0] = NS_STATE_COM_CONFIRM;
+void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
+      char *buf, ssize_t len) {
 
-  sendto(context->socket, out_buffer, sizeof(out_buffer), MSG_DONTWAIT,
-        &peer->addr.addr.sa, peer->addr.size);
-  peer->state = NS_STATE_COM_CONFIRM;
-  ns_log_debug("sent confirmation message.");
-}
+  /* clean up marked peers */
+  ns_cleanup(context);
 
-/**
- * Finds or creates a daemon peer for the daemons context.
- *
- * @return A pointer to the found or created peer or NULL on any error (which
- *       propably will be not enough memory in constrained environments)
- */
-ns_daemon_peer_t* ns_find_or_create_peer(ns_daemon_context_t *context,
-      ns_abstract_address_t *peer_addr) {
-  
-  ns_daemon_peer_t *peer;
-  
-  HASH_FIND(hh, context->peers, peer_addr, sizeof(ns_abstract_address_t), peer);
-  if(peer) {
-    return peer;
-  }
-  
-  /* peer doesn't exist, create and store a new one */
-  peer = (ns_daemon_peer_t*) malloc(sizeof(ns_daemon_peer_t));
-  
-  /* propably enough memory available to malloc */
+  ns_peer_t *peer;
+  peer = ns_find_or_create_peer(context, addr);
   if(!peer) {
-    ns_log_warning("not enough memory to allocate memory for a new peer.");
-    return NULL;
+    ns_log_warning("no peer available to handle this request, discarding it.");
+    return;
   }
+
+  if(ns_discard_invalid_messages(context, buf, len) < 0)
+    return;
   
-  /* ok, we have enough memory and a newly created peer, initialize it with data */
-  memcpy(&peer->addr, peer_addr, sizeof(*peer_addr));
-  ns_daemon_reset_peer(peer);
-  
-  HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
-  ns_log_debug("created new peer");
-  
-  return peer;
+  char code = buf[0];
+
+  /* No switch-case because of Contiki Threads */
+  if(code == NS_STATE_KEY_REQUEST) {
+    ;
+  } else if(code == NS_STATE_KEY_RESPONSE) {
+    ;
+  } else if(code == NS_STATE_COM_REQUEST) {
+    ns_handle_com_request(context, peer, buf, len);
+  } else if(code == NS_STATE_COM_CHALLENGE) {
+    ;
+  } else if(code == NS_STATE_COM_RESPONSE) {
+    ns_handle_com_response(context, peer, buf, len);
+  } else if(code == NS_STATE_COM_CONFIRM) {
+    ;
+  } else {
+    ns_log_warning("this shouldn't be reached at all because of ns_discard_invalid_messages");
+  }
 }
 
-void ns_daemon_reset_peer(ns_daemon_peer_t *peer) {
+void ns_set_credentials(ns_context_t *context, char *identity, char *key) {
   
-  memset(&peer->nonce, 0, NS_NONCE_LENGTH);
-  memset(&peer->identity, 0, NS_IDENTITY_LENGTH);
-  memset(&peer->key, 0, NS_KEY_LENGTH);
-  peer->expires = 0;
-  peer->state = NS_STATE_COM_REQUEST;
+  memcpy(context->identity, identity, NS_IDENTITY_LENGTH);
+  memcpy(context->key, key, NS_RIN_KEY_LENGTH);
 }
 
-void ns_daemon_cleanup(ns_daemon_context_t *context) {
+void ns_set_role(ns_context_t *context, ns_role_t role) {
   
-  ns_daemon_peer_t *peer, *tmp;
+  context->role = role;
+}
 
-  HASH_ITER(hh, context->peers, peer, tmp) {
-    /* peer is marked to be deleted and live time expired */
-    if(peer->expires != 0 && peer->expires < time(NULL)) {
-      HASH_DEL(context->peers, peer);
-      free(peer);
-    }
+ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler) {
+  
+  ns_context_t *context = NULL;
+  context = malloc(sizeof(ns_context_t));
+  
+  if(context) {
+    memset(context, 0, sizeof(ns_context_t));
+    context->app = app;
+    context->handler = handler;
   }
+  
+  return context;
+}
+
+void ns_free_context(ns_context_t *context) {
+  free(context);
 }

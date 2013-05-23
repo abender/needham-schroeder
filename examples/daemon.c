@@ -1,6 +1,8 @@
 #include "needham.h"
 #include "uthash.h"
 
+/* ---------------------------- Identity Storage --------------------------- */
+
 typedef struct {
   UT_hash_handle hh;
   char name[NS_IDENTITY_LENGTH];
@@ -45,17 +47,50 @@ int get_key(char *identity_name, char *key) {
   }
 }
 
+/* ---------------------------- Network Handlers --------------------------- */
+
+int send_to_peer(struct ns_context_t *context, ns_abstract_address_t *addr,
+      uint8_t *data, size_t len) {
+  
+  return sendto( *((int*) context->app), data, len, MSG_DONTWAIT, &addr->addr.sa, addr->size);
+}
+
+/* ------------------------------------------------------------------------- */
+
 int main(int argc, char **argv) {
   
+  ns_context_t *context;
+  ns_abstract_address_t tmp_addr;
   int port = 50002;
+  int fd, read_bytes;
   char *key = "1111111111222222";
   char *identity = "example_daemon";
-  ns_daemon_handler_t handler  = {
+  char in_buffer[NS_DAEMON_BUFFER_SIZE];
+  
+  ns_handler_t handler  = {
+    .read = NULL,
+    .write = send_to_peer,
     .store_key = store_key,
-    .get_key = get_key
+    .get_key = get_key,
+    .event = NULL
   };
   
-  ns_daemon(&handler, port, identity, key);
+  fd = ns_bind_socket(port, AF_INET6);
+  /* Check existing fd */
+  
+  context = ns_initialize_context(&fd, &handler);
+  /* Check existing context */
+  
+  ns_set_credentials(context, identity, key);
+  
+  ns_set_role(context, NS_ROLE_DAEMON);
+  
+  while(1) {
+    read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
+    ns_handle_message(context, &tmp_addr, in_buffer, read_bytes);
+  }
+  
+  ns_free_context(context);
   
   return 0;
 }

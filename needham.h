@@ -29,6 +29,7 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <time.h>
+#include <inttypes.h>
 
 #include "util.h"
 #include "uthash.h"
@@ -59,6 +60,8 @@
 #define NS_COM_REQUEST_LENGTH 1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH
 #define NS_COM_CHALLENGE_LENGTH 1+NS_NONCE_LENGTH
 #define NS_COM_RESPONSE_LENGTH 1+NS_NONCE_LENGTH
+
+#define NS_DAEMON_BUFFER_SIZE NS_COM_REQUEST_LENGTH
 
 #define NS_RETRANSMIT_TIMEOUT 5 // Timeout length for retransmissions in seconds
 
@@ -124,35 +127,6 @@ typedef struct {
   
 } ns_client_handler_t;
 
-/**
- * These callbacks are used to interface the daemon, which is waiting for client
- * connections.
- */
-typedef struct {
-
-  /**
-   * Callback to store an identity name and its corresponding key. This function
-   * may be called more than once, the user MUST update the key of identity_name
-   * if identity_name is already present.
-   *
-   * @return
-   *  -1 : On any error
-   *   0 : success
-   */
-  int (*store_key)(char *identity_name, char *key);
-  
-  /**
-   * Callback to get a key for \p identity_name. The key must be placed in
-   * \p key.
-   *
-   * @return
-   *   0 : success
-   *  -1 : on any error, identity not found, key not found etc.
-   */
-  int (*get_key)(char *identity_name, char *key);
-  
-} ns_daemon_handler_t;
-
 /* Message codes */
 typedef enum {
   NS_STATE_INITIAL = 0,
@@ -173,6 +147,12 @@ typedef enum {
   NS_ERR_TIMEOUT,
   NS_ERR_UNKNOWN
 } ns_error_t;
+
+typedef enum {
+  NS_ROLE_CLIENT = 0,
+  NS_ROLE_SERVER,
+  NS_ROLE_DAEMON
+} ns_role_t;
 
 /* IPv4/IPv6 Address abstraction */
 typedef struct {
@@ -209,23 +189,6 @@ typedef struct {
   int socket;
 } ns_client_context_t;
 
-typedef struct {
-  UT_hash_handle hh;
-  ns_abstract_address_t addr;
-  char nonce[NS_NONCE_LENGTH];
-  char identity[NS_IDENTITY_LENGTH];
-  char key[NS_KEY_LENGTH];
-  int state;
-  time_t expires;
-} ns_daemon_peer_t;
-
-typedef struct {
-  ns_daemon_peer_t *peers;
-  ns_daemon_handler_t *handler;
-  char identity[NS_IDENTITY_LENGTH];
-  char key[NS_RIN_KEY_LENGTH];
-  int socket;
-} ns_daemon_context_t;
 
 /**
  * Start a needham-schroeder server. The server is waiting for key requests by
@@ -237,17 +200,6 @@ typedef struct {
  * @param port The port the server should listen on
  */
 void ns_server(ns_server_handler_t *handler, int port);
-
-/**
- * Start a needham-schroeder daemon, waiting for communication requests by a
- * client.
- *
- * @param handler Callbacks for the daemon. See struct description.
- * @param port The port the server should listen on
- * @param identity The daemons identity as stored in the server
- * @param key The daemons key as stored in the server
- */
-void ns_daemon(ns_daemon_handler_t *handler, int port, char *identity, char *key);
 
 /**
  * Starts a client which will try to get a new key from the server to
@@ -275,5 +227,66 @@ int ns_get_key(ns_client_handler_t handler,
  * ns_error_t) 0 -> "NS_STATE_INITIAL" etc.
  */
 char* ns_state_to_str(int state);
+
+
+
+/* -------------------------- Revamp ---------------------- */
+
+struct ns_context_t;
+
+typedef struct {
+  
+  int (*read)(struct ns_context_t *context, ns_abstract_address_t *addr,
+        uint8_t *data, size_t len);
+  
+  int (*write)(struct ns_context_t *context, ns_abstract_address_t *addr,
+        uint8_t *data, size_t len);
+  
+  int (*store_key)(char *identity_name, char *key);
+  
+  int (*get_key)(char *identity_name, char *key);
+  
+  int (*event)(int code);
+  
+} ns_handler_t;
+
+typedef struct {
+
+  UT_hash_handle hh; /* FIXME ifdef CONTIKI use list instead of hash */
+  ns_abstract_address_t addr;
+  char nonce[NS_NONCE_LENGTH];
+  char identity[NS_IDENTITY_LENGTH];
+  char key[NS_KEY_LENGTH];
+  int state;
+  time_t expires;
+  
+} ns_peer_t;
+
+typedef struct ns_context_t {
+  
+  ns_handler_t *handler; /* User callback functions */
+  ns_peer_t *peers;
+  void *app; /* Socket fd for Unix Systems or uip_udp_conn for Contiki */
+  char nonce[NS_NONCE_LENGTH];
+  char identity[NS_IDENTITY_LENGTH];
+  char key[NS_KEY_LENGTH];
+  ns_role_t role;
+  
+} ns_context_t;
+
+int ns_bind_socket(int port, unsigned char family);
+
+ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler);
+
+void ns_free_context(ns_context_t *context);
+
+void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
+      char *buf, ssize_t len);
+      
+void ns_set_credentials(ns_context_t *context, char *identity, char *key);
+
+void ns_set_role(ns_context_t *context, ns_role_t role);
+
+
 
 #endif // _NEEDHAM_SCHROEDER_H_
