@@ -111,3 +111,74 @@ void ns_dump_byte_to_bin(char *b) {
   }
   fflush(stdout);
 }
+
+void print_sockaddr(const struct sockaddr *addr) {
+  
+  if(addr == NULL) return;
+  
+  switch(addr->sa_family) {
+    case AF_INET:
+      printf("sin_family: %u\n", ((struct sockaddr_in *) addr)->sin_family);
+      printf("sin_port: %u\n", ntohs(((struct sockaddr_in *) addr)->sin_port));
+      printf("sin_addr: %lu\n", (unsigned long)(((struct sockaddr_in *) addr)->sin_addr.s_addr));
+      printf("zeroes: ");
+      ns_dump_bytes_to_hex((char*)&((struct sockaddr_in *) addr)->sin_zero, 8);
+      printf("\n");
+      break;
+    case AF_INET6:
+      printf("sin6_port: %u\n", ntohs(((struct sockaddr_in6 *) addr)->sin6_port));
+      break;
+    default:
+      printf("unknown address-type: %d\n", addr->sa_family);
+      break;
+  }
+}
+
+void print_sockaddr_addr(const struct sockaddr *addr) {
+  
+  if(addr == NULL) return;
+  
+  void *numeric;
+  char buf[INET6_ADDRSTRLEN] = {0};
+  
+  int port = 0;
+  
+  switch(addr->sa_family) {
+    case AF_INET:
+      numeric = &((struct sockaddr_in *) addr)->sin_addr;
+      port = ntohs(((struct sockaddr_in *) addr)->sin_port);
+      break;
+    case AF_INET6:
+      numeric = &((struct sockaddr_in6 *) addr)->sin6_addr;
+      port = ntohs(((struct sockaddr_in6 *) addr)->sin6_port);
+      break;
+    default:
+      printf("unknown address-type.");
+      return;
+  }
+  
+  if(inet_ntop(addr->sa_family, numeric, buf, sizeof(buf)) == NULL) {
+    printf("conversion error.");
+  } else {
+    if(addr->sa_family == AF_INET) {
+      printf("%s", buf);
+    } else { // AF_INET6
+      printf("[%s]", buf);
+    }
+
+    if(port != 0) printf(":%u", port);
+  }
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+

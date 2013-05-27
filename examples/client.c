@@ -1,6 +1,8 @@
 #include "needham.h"
 #include "uthash.h"
 
+/* ---------------------------- Identity Storage --------------------------- */
+
 typedef struct {
   UT_hash_handle hh;
   char name[NS_IDENTITY_LENGTH];
@@ -34,11 +36,23 @@ int get_key(char *identity_name, char *key) {
   }
 }
 
-int result(int code) {
+/* ----------------------------- Event Handling ---------------------------- */
+
+int event(int code) {
   printf("needham-schroeder finished its negotiation with exit code %s.\n",
         ns_state_to_str(code));
   return 0;
 }
+
+/* ---------------------------- Network Handlers --------------------------- */
+
+int send_to_peer(struct ns_context_t *context, ns_abstract_address_t *addr,
+      uint8_t *data, size_t len) {
+
+  return sendto( *((int*) context->app), data, len, MSG_DONTWAIT, &addr->addr.sa, addr->size);
+}
+
+/* ---------------------------------- Util --------------------------------- */
 
 void print_identities() {
   identity_t *id = NULL;
@@ -55,7 +69,17 @@ void print_identities() {
   }
 }
 
+/* ------------------------------------------------------------------------- */
+
 int main(int argc, char **argv) {
+  
+  ns_context_t *context;
+  ns_abstract_address_t tmp_addr;
+  int fd, read_bytes;
+  char in_buffer[NS_CLIENT_BUFFER_SIZE];
+  memset(&tmp_addr, 0, sizeof(ns_abstract_address_t));
+  tmp_addr.size = sizeof(tmp_addr.addr);
+  
   
   char *server_address = "127.0.0.1";
   char *partner_address = "127.0.0.1";
@@ -69,18 +93,46 @@ int main(int argc, char **argv) {
   
   char *key = "0123456789012345";
   
-  ns_client_handler_t handler  = {
+  ns_handler_t handler  = {
+    .read = NULL,
+    .write = send_to_peer,
     .store_key = store_key,
     .get_key = get_key,
-    .result = result
+    .event = event
   };
   
-  ns_get_key(handler,
-        server_address, partner_address, 
-        server_port, client_port, partner_port,
-        client_identity, partner_identity, key);
+  fd = ns_bind_socket(client_port, AF_INET);
+  
+  context = ns_initialize_context(&fd, &handler);
+  if(!context) {
+    ns_log_fatal("could not create context.");
+    exit(-1);
+  }
+  
+  ns_set_credentials(context, client_identity, key);
+  
+  ns_set_role(context, NS_ROLE_CLIENT);
+  
+  /* Here the key retrieval process starts */
+  
+  ns_get_key(context, server_address, server_port, partner_address, partner_port,
+        partner_identity);
+  
+  while(context->state < NS_STATE_FINISHED) {
+    read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
+    ns_handle_message(context, &tmp_addr, in_buffer, read_bytes);
+  }
+  
+  if(context->state == NS_STATE_FINISHED) {
+    ns_log_info("successfully finished key negotiation.");
+  } else {
+    ns_log_error("an error occured while negotiating the key: %s", ns_state_to_str(context->state));
+  }
+  
+  /* Key process completed, either on success or any error */
   
   print_identities();
+  ns_free_context(context);
         
   return 0;
 }

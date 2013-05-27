@@ -61,12 +61,13 @@ int main(int argc, char **argv) {
   
   ns_context_t *context;
   ns_abstract_address_t tmp_addr;
-  int port = 50002;
+  char in_buffer[NS_DAEMON_BUFFER_SIZE];
   int fd, read_bytes;
+  
+  int port = 50002;
   char *key = "1111111111222222";
   char *identity = "example_daemon";
-  char in_buffer[NS_DAEMON_BUFFER_SIZE];
-  
+
   ns_handler_t handler  = {
     .read = NULL,
     .write = send_to_peer,
