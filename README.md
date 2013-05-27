@@ -38,7 +38,6 @@ The NS-client performs retransmissions to deal with lossy networks. To adjust it
 ## TODOs
 
 * Cleanup of peers for the client and server (daemon should be working, check it.)
-* Reimplement retransmissions
 * Implement tests!
 * Compatibility with Contiki-OS is planned for future work
 * Implement padding and other encryption methods

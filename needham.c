@@ -52,6 +52,8 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
 
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
       char *buf, ssize_t len);
+      
+void ns_send_buffered(ns_context_t *context, ns_peer_t *peer, uint8_t *data, size_t len);
 
 void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *peer);
 
@@ -82,6 +84,10 @@ void ns_handle_com_confirm(ns_context_t *context, ns_peer_t *peer,
       char *packet, ssize_t len);
 
 void ns_handle_err_unknown_id(ns_context_t *context);
+
+void ns_retransmit(ns_context_t *context);
+
+void ns_reset_buffer(ns_peer_t *peer);
 
 ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
       ns_abstract_address_t *peer_addr);
@@ -325,6 +331,21 @@ void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
   }
 }
 
+void ns_send_buffered(ns_context_t *context, ns_peer_t *peer, uint8_t *data, size_t len) {
+
+  /* store this packet for possible retransmissions */
+  peer->msg_buf = (uint8_t*) malloc(len);
+  if(!peer->msg_buf) {
+    ns_log_warning("no memory to buffer this message, if it is lost a retransmit timeout will occur.");
+    peer->retransmits = NS_RETRANSMIT_MAX+1;
+  } else {
+    memcpy(peer->msg_buf, data, len);
+    peer->msg_buf_len = len;
+    peer->retransmits = 0;    
+  }
+  context->handler->write(context, &peer->addr, data, len);
+}
+
 void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *peer) {
   
   ns_random_key(context->nonce, NS_NONCE_LENGTH);
@@ -342,7 +363,8 @@ void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *pe
   pos += NS_IDENTITY_LENGTH;
   memcpy(&out_buffer[pos], context->nonce, NS_NONCE_LENGTH);
   
-  context->handler->write(context, &server->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  ns_send_buffered(context, server, (uint8_t*) out_buffer, sizeof(out_buffer));
+
   context->state = NS_STATE_KEY_REQUEST;
   ns_log_info("sent key request to server.");
   
@@ -447,6 +469,8 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
 void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
        char *packet, ssize_t len) {
   
+  ns_reset_buffer(server);
+  
   char altered_nonce[NS_NONCE_LENGTH] = { 0 };
   char partner_identity[NS_IDENTITY_LENGTH] = { 0 };
   char com_key[NS_KEY_LENGTH] = { 0 };
@@ -493,7 +517,7 @@ void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet
   out_buffer[0] = NS_STATE_COM_REQUEST;
   memcpy(&out_buffer[1], packet, NS_KEY_LENGTH+NS_IDENTITY_LENGTH);
   
-  context->handler->write(context, &partner->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  ns_send_buffered(context, partner, (uint8_t*) out_buffer, sizeof(out_buffer));
   
   context->state = NS_STATE_COM_REQUEST;
   ns_log_debug("sent com request to peer.");
@@ -544,6 +568,8 @@ void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
 void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
        char *in_buffer, ssize_t len) {
   
+  ns_reset_buffer(peer);
+  
   ns_log_debug("received com challenge");
   context->state = NS_STATE_COM_CHALLENGE;
   
@@ -566,7 +592,8 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
   ns_encrypt((u_char*) peer->key, (u_char*) nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
       
-  context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
+  ns_send_buffered(context, peer, (uint8_t*) out_buffer, sizeof(out_buffer));
+  
   context->state = NS_STATE_COM_RESPONSE;
   ns_log_debug("sent com response");
 }
@@ -606,6 +633,8 @@ void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer) {
 void ns_handle_com_confirm(ns_context_t *context, ns_peer_t *peer,
        char *packet, ssize_t len) {
   
+  ns_reset_buffer(peer);
+  
   context->handler->store_key(peer->identity, peer->key);
   context->state = NS_STATE_FINISHED;
   ns_log_info("received com confirm. process completed.");
@@ -616,6 +645,35 @@ void ns_handle_err_unknown_id(ns_context_t *context) {
   context->state = NS_ERR_UNKNOWN_ID;
   ns_log_info("the server doesn't know the used id(s)");
   context->handler->event(context->state);
+}
+
+void ns_retransmit(ns_context_t *context) {
+
+  ns_peer_t *p = NULL;
+
+  for(p = context->peers; p != NULL; p = p->hh.next) {
+    /* resend if there is anything buffered */
+    if(p->msg_buf != NULL) {
+      if(p->retransmits < NS_RETRANSMIT_MAX) {
+        context->handler->write(context, &p->addr, p->msg_buf, p->msg_buf_len);
+        p->retransmits++;
+        ns_log_info("retransmitted message [%d/%d]", p->retransmits, NS_RETRANSMIT_MAX);
+      /* max retransmittions reached */
+      } else {
+        ns_log_info("maximum retransmittions reached.");
+        context->state = NS_ERR_TIMEOUT;
+        context->handler->event(NS_ERR_TIMEOUT);
+      }
+    }
+  }
+}
+
+void ns_reset_buffer(ns_peer_t *peer) {
+  
+  free(peer->msg_buf);
+  peer->msg_buf = NULL;
+  peer->msg_buf_len = 0;
+  peer->retransmits = 0;
 }
 
 /**
@@ -676,6 +734,9 @@ void ns_reset_peer(ns_peer_t *peer) {
   memset(peer->key, 0, NS_KEY_LENGTH);
   peer->expires = 0;
   peer->state = NS_STATE_INITIAL;
+  peer->msg_buf = NULL;
+  peer->msg_buf_len = 0;
+  peer->retransmits = 0;
 }
 
 void ns_cleanup(ns_context_t *context) {
@@ -756,6 +817,8 @@ void ns_free_peers(ns_context_t *context) {
   /* Free all peers */
   HASH_ITER(hh, context->peers, peer, tmp) {
     HASH_DEL(context->peers, peer);
+    if(peer->msg_buf)
+      free(peer->msg_buf);
     free(peer);
   }
 }

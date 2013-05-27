@@ -174,6 +174,9 @@ typedef struct {
   char key[NS_KEY_LENGTH];
   int state;
   time_t expires;
+  uint8_t *msg_buf; /* buffer for messages, used for retransmissions */
+  size_t msg_buf_len; /* length of the retransmission buffer */
+  int retransmits; /* number of performed retransmissions */
   
 } ns_peer_t;
 
@@ -266,5 +269,13 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
  * @param state
  */
 char* ns_state_to_str(int state);
+
+/**
+ * Retransmit messages if there are any needed to be retransmitted. Fires an event
+ * if maximal retransmissions are reached.
+ *
+ * @param context
+ */
+void ns_retransmit(ns_context_t *context);
 
 #endif // _NEEDHAM_SCHROEDER_H_

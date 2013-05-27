@@ -1,6 +1,10 @@
 #include "needham.h"
 #include "uthash.h"
 
+#include <errno.h>
+
+int run = 1;
+
 /* ---------------------------- Identity Storage --------------------------- */
 
 typedef struct {
@@ -41,6 +45,7 @@ int get_key(char *identity_name, char *key) {
 int event(int code) {
   printf("needham-schroeder finished its negotiation with exit code %s.\n",
         ns_state_to_str(code));
+  run = 0;
   return 0;
 }
 
@@ -74,12 +79,16 @@ void print_identities() {
 int main(int argc, char **argv) {
   
   ns_context_t *context;
-  ns_abstract_address_t tmp_addr;
   int fd, read_bytes;
   char in_buffer[NS_CLIENT_BUFFER_SIZE];
+  
+  ns_abstract_address_t tmp_addr;
   memset(&tmp_addr, 0, sizeof(ns_abstract_address_t));
   tmp_addr.size = sizeof(tmp_addr.addr);
   
+  fd_set rfds;
+  struct timeval timeout;
+  int sres = 0;
   
   char *server_address = "127.0.0.1";
   char *partner_address = "127.0.0.1";
@@ -118,9 +127,27 @@ int main(int argc, char **argv) {
   ns_get_key(context, server_address, server_port, partner_address, partner_port,
         partner_identity);
   
-  while(context->state < NS_STATE_FINISHED) {
-    read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
-    ns_handle_message(context, &tmp_addr, in_buffer, read_bytes);
+  while(context->state < NS_STATE_FINISHED && run == 1) {
+    
+    FD_ZERO(&rfds);
+    FD_SET(*((int*) context->app), &rfds);          
+    timeout.tv_sec = NS_RETRANSMIT_TIMEOUT;
+    timeout.tv_usec = 0;
+    
+    sres = select((*((int*) context->app))+1, &rfds, 0, 0, &timeout);
+    
+    if(sres < 0) {
+      ns_log_warning("error while waiting for incoming packets: %s", strerror(errno));
+    
+    /* timeout */
+    } else if(sres == 0) {
+      ns_retransmit(context);
+      
+    /* new packet arrived, handle it */
+    } else {
+      read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
+      ns_handle_message(context, &tmp_addr, in_buffer, read_bytes);
+    }
   }
   
   if(context->state == NS_STATE_FINISHED) {
