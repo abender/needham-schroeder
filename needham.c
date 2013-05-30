@@ -96,6 +96,12 @@ void ns_reset_buffer(ns_peer_t *peer);
 ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
       ns_abstract_address_t *peer_addr);
   
+ns_peer_t* ns_find_peer_by_address(ns_context_t *context, ns_abstract_address_t *addr);
+  
+void ns_add_peer(ns_context_t *context, ns_peer_t *peer);
+  
+int ns_address_is_equal(ns_abstract_address_t *addr1, ns_abstract_address_t *addr2);
+  
 ns_peer_t* ns_find_peer_by_identity(ns_context_t *context, char *identity);
 
 void ns_reset_peer(ns_peer_t *peer);
@@ -139,7 +145,7 @@ void ns_alter_nonce(char *original, char *altered) {
   memcpy(altered, buf, NS_NONCE_LENGTH);
 }
 
-__attribute__ ((noinline)) int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
+int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
   
   char altered_nonce[NS_NONCE_LENGTH];
   ns_alter_nonce(original_nonce, altered_nonce);
@@ -663,7 +669,11 @@ void ns_retransmit(ns_context_t *context) {
 
   ns_peer_t *p = NULL;
 
+#ifdef CONTIKI
+  for(p = list_head(context->peers); p; p = list_item_next(p)) {
+#else /* CONTIKI */
   for(p = context->peers; p != NULL; p = p->hh.next) {
+#endif /* CONTIKI */
     /* resend if there is anything buffered */
     if(p->msg_buf != NULL) {
       if(p->retransmits < NS_RETRANSMIT_MAX) {
@@ -699,7 +709,7 @@ ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
   
   ns_peer_t *peer = NULL;
   
-  HASH_FIND(hh, context->peers, peer_addr, sizeof(ns_abstract_address_t), peer);
+  peer = ns_find_peer_by_address(context, peer_addr);
   if(peer) {
     return peer;
   }
@@ -710,21 +720,68 @@ ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
   /* propably enough memory available to malloc */
   if(!peer) {
     ns_log_warning("not enough memory to allocate memory for a new peer.");
-    return NULL;
+    return peer;
   }
   
   /* ok, we have enough memory and a newly created peer, initialize it with data */
   memcpy(&peer->addr, peer_addr, sizeof(ns_abstract_address_t));
   ns_reset_peer(peer);
   
-  HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
+  ns_add_peer(context, peer);
+
   ns_log_debug("created new peer");
   
   return peer;
 }
 
+ns_peer_t* ns_find_peer_by_address(ns_context_t *context, ns_abstract_address_t *addr) {
+  
+  ns_peer_t *peer = NULL;
+  
+#ifndef CONTIKI
+  HASH_FIND(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
+#else /* CONTIKI */
+  for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
+    if(ns_address_is_equal(&peer->addr, addr)) break;
+  }
+#endif /* CONTIKI */
+
+  return peer;
+}
+
+void ns_add_peer(ns_context_t *context, ns_peer_t *peer) {
+#ifndef CONTIKI
+  HASH_ADD(hh, context->peers, addr, sizeof(ns_abstract_address_t), peer);
+#else /* CONTIKI */
+  list_add(context->peers, peer);
+#endif /* CONTIKI */
+}
+
+int ns_address_is_equal(ns_abstract_address_t *addr1, ns_abstract_address_t *addr2) {
+#ifndef CONTIKI
+  if(addr1->addr.sa.sa_family != addr2->addr.sa.sa_family)
+    return 0;
+    
+  if(addr1->addr.sa.sa_family == AF_INET) {
+    return (addr1->addr.sin.sin_port == addr2->addr.sin.sin_port &&
+          memcmp(&addr1->addr.sin.sin_addr, &addr2->addr.sin.sin_addr,
+          sizeof(struct in_addr)) == 0);
+  } else if(addr1->addr.sa.sa_family == AF_INET6) {
+    return (addr1->addr.sin6.sin6_port == addr2->addr.sin6.sin6_port &&
+          memcmp(&addr1->addr.sin6.sin6_addr, &addr2->addr.sin6.sin6_addr,
+          sizeof(struct in6_addr)) == 0);
+  } else {
+    return 0;
+  }
+  
+#else /* CONTIKI */
+  return (addr1->size == addr2->size && uip_ipaddr_cmp(&addr1->addr, &addr2->addr) &&
+        addr1->port == addr2->port);
+#endif /* CONTIKI */
+}
+
 /**
- * Searches for an existign peer with \p identity.
+ * Searches for an existing peer with \p identity.
  *
  * @return A pointer to the found peer or NULL if none is found.
  */
@@ -732,10 +789,18 @@ ns_peer_t* ns_find_peer_by_identity(ns_context_t *context, char *identity) {
   
   ns_peer_t *p = NULL;
 
+#ifndef CONTIKI
   for(p = context->peers; p != NULL; p = p->hh.next) {
     if(strncmp(p->identity, identity, strlen(identity)) == 0)
       return p;
   }
+#else /* CONTIKI */
+  for(p = list_head(context->peers); p; p = list_item_next(p)) {
+    if(strncmp(p->identity, identity, strlen(identity)) == 0)
+      return p;
+  }
+#endif /* CONTIKI */
+  
   return p;
 }
 
@@ -753,8 +818,17 @@ void ns_reset_peer(ns_peer_t *peer) {
 
 void ns_cleanup(ns_context_t *context) {
   
-  ns_peer_t *peer, *tmp;
+  ns_peer_t *peer;
 
+#ifdef CONTIKI
+  for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
+    if(peer->expires != 0 && peer->expires < time(NULL)) {
+      list_remove(context->peers, peer);
+      free(peer);
+    }
+  }
+#else /* CONTIKI */
+  ns_peer_t *tmp;
   HASH_ITER(hh, context->peers, peer, tmp) {
     /* peer is marked to be deleted and live time expired */
     if(peer->expires != 0 && peer->expires < time(NULL)) {
@@ -762,6 +836,7 @@ void ns_cleanup(ns_context_t *context) {
       free(peer);
     }
   }
+#endif /* CONTIKI */
 }
 
 /**
@@ -814,6 +889,10 @@ ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler) {
     memset(context, 0, sizeof(ns_context_t));
     context->app = app;
     context->handler = handler;
+    
+#ifdef CONTIKI
+    LIST_STRUCT_INIT(context, peers);
+#endif /* CONTIKI */
   }
   
   return context;
@@ -825,12 +904,23 @@ void ns_free_context(ns_context_t *context) {
 }
 
 void ns_free_peers(ns_context_t *context) {
-  ns_peer_t *peer, *tmp;
-  /* Free all peers */
+  ns_peer_t *peer;
+
+#ifdef CONTIKI
+  for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
+    list_remove(context->peers, peer);
+    if(peer->msg_buf)
+      free(peer->msg_buf);
+    free(peer);
+  }
+#else /* CONTIKI */
+  ns_peer_t *tmp;
   HASH_ITER(hh, context->peers, peer, tmp) {
     HASH_DEL(context->peers, peer);
     if(peer->msg_buf)
       free(peer->msg_buf);
     free(peer);
   }
+#endif /* CONTIKI */
+
 }

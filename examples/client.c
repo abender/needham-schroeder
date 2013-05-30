@@ -1,5 +1,4 @@
 #include "needham.h"
-#include "uthash.h"
 
 #include <errno.h>
 

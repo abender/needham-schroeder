@@ -1,5 +1,4 @@
 #include "needham.h"
-#include "uthash.h"
 
 /* ---------------------------- Identity Storage --------------------------- */
 
@@ -87,6 +86,8 @@ int main(int argc, char **argv) {
   ns_set_credentials(context, identity, key);
   
   ns_set_role(context, NS_ROLE_DAEMON);
+  
+  ns_log_info("listening on port %d", port);
   
   while(1) {
     read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);

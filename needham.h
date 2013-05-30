@@ -32,11 +32,15 @@
 #include <inttypes.h>
 
 #include "ns_util.h"
+
+#ifndef CONTIKI
 #include "uthash.h"
+#endif /* CONTIKI */
 
 #ifdef CONTIKI
 #include "uip.h"
-#endif
+#include "list.h"
+#endif /* CONTIKI */
 
 /* LOGGING: Set NS_LOG_LEVEL in "util.h" to the desired level, which can be:
  *
@@ -119,7 +123,7 @@ typedef struct {
     struct sockaddr_in6 sin6;
   } addr;
 } ns_abstract_address_t;
-#endif
+#endif /* CONTIKI */
 
 
 struct ns_context_t;
@@ -179,8 +183,11 @@ typedef struct {
 } ns_handler_t;
 
 typedef struct {
-
-  UT_hash_handle hh; /* FIXME ifdef CONTIKI use list instead of hash */
+#ifndef CONTIKI
+  UT_hash_handle hh;
+#else /* CONTIKI */
+  struct ns_peer_t *next;
+#endif /* CONTIKI */
   ns_abstract_address_t addr;
   char nonce[NS_NONCE_LENGTH];
   char identity[NS_IDENTITY_LENGTH];
@@ -196,7 +203,13 @@ typedef struct {
 typedef struct ns_context_t {
   
   ns_handler_t *handler; /* User callback functions */
+  
+#ifndef CONTIKI
   ns_peer_t *peers;
+#else /* CONTIKI */
+  LIST_STRUCT(peers);
+#endif /* CONTIKI */
+  
   void *app; /* Socket fd for Unix Systems or uip_udp_conn for Contiki */
   char nonce[NS_NONCE_LENGTH];
   char identity[NS_IDENTITY_LENGTH];
