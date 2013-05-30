@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
   char in_buffer[NS_DAEMON_BUFFER_SIZE];
   int fd, read_bytes;
   
-  int port = 50002;
+  int port = 50010;
   char *key = "1111111111222222";
   char *identity = "example_daemon";
 

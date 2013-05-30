@@ -41,14 +41,18 @@ void ns_alter_nonce(char *original, char *altered);
 
 int ns_verify_nonce(char *original_nonce, char *verify_nonce);
 
+#ifndef CONTIKI
 int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved);
+#endif /* CONTIKI */
 
 char* ns_state_to_str(int state);
 
 /* Protocol functions */
 
+#ifndef CONTIKI
 void ns_get_key(ns_context_t *context, char *server_address, int server_port,
       char *partner_address, int partner_port, char *partner_identity);
+#endif /* CONTIKI */
 
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
       char *buf, ssize_t len);
@@ -123,19 +127,19 @@ void ns_alter_nonce(char *original, char *altered) {
   }
 #endif
   
-  char buf[SHA256_BLOCK_LENGTH] = { 0 };
+  char buf[SHA256_DIGEST_LENGTH] = { 0 };
 
   memcpy(buf, original, NS_NONCE_LENGTH);
   
 	SHA256_CTX	ctx256;
 	SHA256_Init(&ctx256);
 	SHA256_Update(&ctx256, (unsigned char*) buf, NS_NONCE_LENGTH);
-	SHA256_End(&ctx256, buf);
+  SHA256_Final((uint8_t*) buf, &ctx256);
 	
   memcpy(altered, buf, NS_NONCE_LENGTH);
 }
 
-int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
+__attribute__ ((noinline)) int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
   
   char altered_nonce[NS_NONCE_LENGTH];
   ns_alter_nonce(original_nonce, altered_nonce);
@@ -155,6 +159,7 @@ int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
   }
 }
 
+#ifndef CONTIKI
 /* Slightly modified version of resolve_address from libtinydtls by Olaf Bergmann
  ( MIT License: http://tinydtls.sourceforge.net/)  */
 int
@@ -200,7 +205,9 @@ ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
   freeaddrinfo(res);
   return -1;
 }
+#endif /* CONTIKI */
 
+#ifndef CONTIKI
 /**
  * Creates and binds an IPv6 UDP socket and returns its fd.
  */
@@ -248,6 +255,7 @@ int ns_bind_socket(int port, unsigned char family) {
   }
   return s;
 }
+#endif /* CONTIKI */
 
 char* ns_state_to_str(int state) {
   switch(state) {
@@ -270,6 +278,7 @@ char* ns_state_to_str(int state) {
 
 /* ------------------------------ #1 Protocol ------------------------------ */
 
+#ifndef CONTIKI
 void ns_get_key(ns_context_t *context, char *server_address, int server_port,
       char *partner_address, int partner_port, char *partner_identity) {
         
@@ -289,6 +298,7 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
   
   ns_send_key_request(context, server, partner);
 }
+#endif /* CONTIKI */
 
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
       char *buf, ssize_t len) {
@@ -574,13 +584,13 @@ void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
   context->state = NS_STATE_COM_CHALLENGE;
   
   char dec_nonce[NS_NONCE_LENGTH] = { 0 };
-  
+
   ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1],
         (u_char*) dec_nonce, sizeof(dec_nonce), NS_KEY_LENGTH);
   
   char altered_nonce[NS_NONCE_LENGTH] = { 0 };
   ns_alter_nonce(dec_nonce, altered_nonce);
-  
+
   ns_send_com_response(context, peer, altered_nonce);
 }
 
@@ -600,18 +610,20 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
 
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, ssize_t len) {
-  
+
   char received_nonce[NS_NONCE_LENGTH];
   
   ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
       sizeof(received_nonce), NS_KEY_LENGTH);
-      
+
   /* only store the key if the nonce verification succeded. otherwise the peer
      will be deleted without storing any credentials */
   if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
     context->handler->store_key(peer->identity, peer->key);
     ns_send_com_confirm(context, peer);
     ns_log_info("completed ns-handshake and stored new key.");
+  } else {
+    ns_log_info("nonce verification failed");
   }
 
   /* mark this peer as completed. if the client doesn't send any further message
@@ -778,7 +790,7 @@ int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len) {
   } else {
     ns_log_warning("undefined application role, discarding message! (%d)", role);
   }
-  ns_log_info("received message with invalid code. (code %d)", code);
+  ns_log_info("received message with invalid code (%d : %s).", code, ns_state_to_str(code));
   return -1;
 }
 

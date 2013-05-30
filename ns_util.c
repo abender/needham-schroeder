@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "util.h"
+#include "ns_util.h"
 
 /* ---------------------------- Random Stuff ------------------------------- */
 
@@ -149,7 +149,15 @@ void print_sockaddr(const struct sockaddr *addr) {
   
 }
 
-
+/**
+ * DIRTY!!! only for quick debugging
+ */
+char* ns_stringify(char *d, int len) {
+  char *r = (char*) malloc(100);
+  memset(r, 0, 100);
+  memcpy(r, d, len);
+  return r;
+}
 
 
 

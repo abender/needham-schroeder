@@ -10,7 +10,7 @@ The library provides callback functions so the user may decide how keys will be 
 
 See [wikipedia/Needham-Schroeder_protocol](http://en.wikipedia.org/wiki/Needham%E2%80%93Schroeder_protocol) for a description of the symmetric key exchange protocol.
 
-The library has been tested with Debian/Linux Systems and OS X.
+The library has been tested with Debian/Linux Systems and OS X. Basic compatibility with [Contiki-OS](http://www.contiki-os.org/) is there, but needs improvements.
 
 ## Usage
 
@@ -37,10 +37,10 @@ The NS-client performs retransmissions to deal with lossy networks. To adjust it
 
 ## TODOs
 
-* Cleanup of peers for the client and server (daemon should be working, check it.)
 * Implement tests!
-* Compatibility with Contiki-OS is planned for future work
+* Improve Contiki compatibility
 * Implement padding and other encryption methods
+* Check cleanups
 * Vary the timeout of retransmissions (It could be possible that 2 clients try to send over the same medium exactly the same time and the packets collide each time)
 
 ## Authors and Contact

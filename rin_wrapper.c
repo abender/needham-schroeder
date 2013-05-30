@@ -23,7 +23,7 @@
  */
 
 #include "rin_wrapper.h"
-#include "util.h"
+#include "ns_util.h"
 
 #include <string.h>
 #include <stdio.h>

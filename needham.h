@@ -31,8 +31,12 @@
 #include <time.h>
 #include <inttypes.h>
 
-#include "util.h"
+#include "ns_util.h"
 #include "uthash.h"
+
+#ifdef CONTIKI
+#include "uip.h"
+#endif
 
 /* LOGGING: Set NS_LOG_LEVEL in "util.h" to the desired level, which can be:
  *
@@ -98,6 +102,13 @@ typedef enum {
   NS_ROLE_DAEMON
 } ns_role_t;
 
+#ifdef CONTIKI
+typedef struct {
+  unsigned char size;
+  uip_ipaddr_t addr;
+  unsigned short port;
+} ns_abstract_address_t;
+#else /* CONTIKI */
 /* IPv4/IPv6 Address abstraction */
 typedef struct {
   socklen_t size;
@@ -108,6 +119,8 @@ typedef struct {
     struct sockaddr_in6 sin6;
   } addr;
 } ns_abstract_address_t;
+#endif
+
 
 struct ns_context_t;
 
@@ -193,6 +206,7 @@ typedef struct ns_context_t {
   
 } ns_context_t;
 
+#ifndef CONTIKI
 /**
  * Creates and binds a (unix) socket to the given \p port and address family.
  *
@@ -200,6 +214,7 @@ typedef struct ns_context_t {
  * @param family The address family this port belongs to. (AF_INET, AF_INET6,...)
  */
 int ns_bind_socket(int port, unsigned char family);
+#endif /* CONTIKI */
 
 /**
  * Creates a new context, which stores many informations needed by the library.

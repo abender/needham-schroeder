@@ -1,0 +1,3 @@
+needham-schroeder_src = ns_util.c needham.c rin_wrapper.c rijndael.c sha2.c
+
+CGLAGS += -DWITH_AES_DECRYPT -DNSDEBUG

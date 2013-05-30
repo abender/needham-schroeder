@@ -67,4 +67,6 @@ void ns_dump_byte_to_bin(char *b);
 
 void print_sockaddr(const struct sockaddr *addr);
 
+char* ns_stringify(char *b, int len);
+
 #endif // _NS_UTILITIES_

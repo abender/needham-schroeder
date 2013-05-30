@@ -24,6 +24,16 @@ int get_key(char *identity_name, char *key) {
     memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
     return 0;
     
+  } else if(strcmp(identity_name, "smartobject-1") == 0) {
+    char *daemon_key = "1111111111222222";
+    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    return 0;
+    
+  } else if(strcmp(identity_name, "bender") == 0) {
+    char *daemon_key = "1234567890123456";
+    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    return 0;
+    
   } else {
     return -1;
   }

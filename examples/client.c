@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
   char *partner_address = "127.0.0.1";
   
   int server_port = 50000;
-  int partner_port = 50002;
+  int partner_port = 50010;
   int client_port = 50001;
   
   char *client_identity = "example_client";
@@ -123,6 +123,9 @@ int main(int argc, char **argv) {
   ns_set_role(context, NS_ROLE_CLIENT);
   
   /* Here the key retrieval process starts */
+  
+  ns_log_info("server: %s, %d | partner: %s, %d, %s", server_address,
+        server_port, partner_address, partner_port, partner_identity);
   
   ns_get_key(context, server_address, server_port, partner_address, partner_port,
         partner_identity);
