@@ -34,12 +34,18 @@
 #include "ns_util.h"
 
 #ifndef CONTIKI
+
+typedef unsigned int clock_time_t;
+
 #include "uthash.h"
+
 #endif /* CONTIKI */
 
 #ifdef CONTIKI
+
 #include "uip.h"
 #include "list.h"
+
 #endif /* CONTIKI */
 
 /* LOGGING: Set NS_LOG_LEVEL in "util.h" to the desired level, which can be:

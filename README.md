@@ -8,7 +8,7 @@ sNS is a small and simple C-library to perform the (symmetric) Needham-Schroeder
 
 The library provides callback functions so the user may decide how keys will be stored/retrieved and how events will be handled.
 
-See [wikipedia/Needham-Schroeder_protocol](http://en.wikipedia.org/wiki/Needham%E2%80%93Schroeder_protocol) for a description of the symmetric key exchange protocol.
+The current version implements the basic Needham-Schroeder protocol, which is vulnerable to a replay attack with a broken session key. I will implement timestamps and its validation to fix this issue soon.
 
 The library has been tested with Debian/Linux Systems and OS X. Basic compatibility with [Contiki-OS](http://www.contiki-os.org/) is there, but needs improvements.
 
@@ -37,11 +37,12 @@ The NS-client performs retransmissions to deal with lossy networks. To adjust it
 
 ## TODOs
 
+* Implement timestamps
 * Implement tests!
 * Improve Contiki compatibility
 * Implement padding and other encryption methods
 * Check cleanups
-* Vary the timeout of retransmissions (It could be possible that 2 clients try to send over the same medium exactly the same time and the packets collide each time)
+* Vary the timeout of retransmissions
 
 ## Authors and Contact
 
