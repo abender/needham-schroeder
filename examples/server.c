@@ -52,10 +52,13 @@ int send_to_peer(struct ns_context_t *context, ns_abstract_address_t *addr,
 int main(int argc, char **argv) {
   
   ns_context_t *context;
-  ns_abstract_address_t tmp_addr;
   char in_buffer[NS_SERVER_BUFFER_SIZE];
   int fd, read_bytes;
   int port = 50000;
+  
+  ns_abstract_address_t tmp_addr;
+  memset(&tmp_addr, 0, sizeof(ns_abstract_address_t));
+  tmp_addr.size = sizeof(tmp_addr.addr);
   
   ns_handler_t handler  = {
     .read = NULL,

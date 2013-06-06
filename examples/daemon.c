@@ -59,9 +59,12 @@ int send_to_peer(struct ns_context_t *context, ns_abstract_address_t *addr,
 int main(int argc, char **argv) {
   
   ns_context_t *context;
-  ns_abstract_address_t tmp_addr;
   char in_buffer[NS_DAEMON_BUFFER_SIZE];
   int fd, read_bytes;
+  
+  ns_abstract_address_t tmp_addr;
+  memset(&tmp_addr, 0, sizeof(ns_abstract_address_t));
+  tmp_addr.size = sizeof(tmp_addr.addr);
   
   int port = 50010;
   char *key = "1111111111222222";
