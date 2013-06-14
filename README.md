@@ -1,14 +1,12 @@
-# sNS - a simple Needham-Schroeder C-library
+# seNS - a simple extended Needham-Schroeder C-library
 
-sNS is a small and simple C-library to perform the (symmetric) Needham-Schroeder(NS)-protocol. It provides basic functions to:
+seNS is a small and simple C-library to perform an extended (symmetric) Needham-Schroeder(NS)-protocol. Extended means in this case, that the basic NS-Protocol has been extended to make use of timestamps, which are used to antagonize replay attacks (see a description of the attack in "[Security Engineering](http://www.cl.cam.ac.uk/~rja14/book.html)" Chapter 3.7.2 by Ross Anderson). It provides basic functions to:
 
 * Run a NS-server, creating and distributing keys for securing some other protocol (for example DTLS in pre-shared-key mode)
 * Run a NS-daemon, waiting for clients to initialize the communication
 * Run a NS-client, retrieving keys from the server and connecting to NS-daemons.
 
 The library provides callback functions so the user may decide how keys will be stored/retrieved and how events will be handled.
-
-The current version implements the basic Needham-Schroeder protocol, which is vulnerable to a replay attack with a broken session key. I will implement timestamps and its validation to fix this issue soon.
 
 The library has been tested with Debian/Linux Systems and OS X. Basic compatibility with [Contiki-OS](http://www.contiki-os.org/) is there, but needs improvements.
 
@@ -17,7 +15,7 @@ The library has been tested with Debian/Linux Systems and OS X. Basic compatibil
 * Checkout the Git-repository, go to the main directory and run `make` to build the library.
 * Go to the examples directory and run in seperate terminal(tab)s: 1) The server and daemon 2) The client.
 * The client will connect to the server and daemon and perform the key exchange.
-* See the examples code and `needham.h` for further informations
+* See the examples code and `needham.h` for further informations and configuration.
 
 It is intended, that the user may choose the lengths for identities, nonces and keys. With the current implementation there are the following limitations:
 
@@ -37,7 +35,6 @@ The NS-client performs retransmissions to deal with lossy networks. To adjust it
 
 ## TODOs
 
-* Implement timestamps
 * Implement tests!
 * Improve Contiki compatibility
 * Implement padding and other encryption methods
@@ -46,7 +43,7 @@ The NS-client performs retransmissions to deal with lossy networks. To adjust it
 
 ## Authors and Contact
 
-sNS was written by Andreas Bender <bender@tzi.de>
+seNS was written by Andreas Bender <bender@tzi.de>
 
 If you have any questions, remarks, suggestion, improvements,
 etc. feel free to drop a line at the address given above.

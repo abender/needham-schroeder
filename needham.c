@@ -108,6 +108,8 @@ void ns_reset_peer(ns_peer_t *peer);
 
 void ns_cleanup(ns_context_t *context);
 
+int ns_validate_timestamp(char* timestamp);
+
 int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len);
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key);
@@ -427,38 +429,40 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     
     context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
   
-  /* Identities found, send..   {I_a, B, S_k, {S_k, A} K_b} K_a 
-      1 Byte  : State (STATE_KEY_RESPONSE)
-      encrypted K_s(
-       16 Bytes : Nonce
-       16 Bytes : Identity Receiver
-       16 Bytes : tmp-Key
-       32 Bytes : encrypted K_r(tmp-Key:16, Identity Sender16)
-     ) */
+  /* Identities found, send  {I_a, B, S_k, {S_k, A, T} K_b} K_a */
   } else {
-    /* State + Nonce + 2 Identities + 2 Keys (whole message) */
-    char out_buffer[1 + NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
+    char out_buffer[1 + NS_ENC_KEY_RESPONSE_LENGTH];
     /* Key for sender-receiver communication */
     char tmp_key[NS_KEY_LENGTH+1] = { 0 };
-    /* tmp_key, identity-sender */
-    char r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
-    /* Encrypted: tmp-key, identity-sender */
-    char enc_r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH];
-    /* Packet for the sender (excluding the state) */
-    char s_packet[NS_NONCE_LENGTH + 2*NS_IDENTITY_LENGTH + 2*NS_KEY_LENGTH];
+    /* The packet for the daemon, without message code
+       (tmp_key, identity-sender, timestamp) */
+    char r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH + NS_TIMESTAMP_LENGTH] = { 0 };
+    char enc_r_packet[NS_ENC_COM_REQ_LENGTH];
+    /* Packet for the sender (excluding the state), unencrypted */
+    char s_packet[NS_NONCE_LENGTH + NS_IDENTITY_LENGTH + NS_KEY_LENGTH +
+                  NS_ENC_COM_REQ_LENGTH];
     
     ns_random_key(tmp_key, NS_KEY_LENGTH);
     
+    /* Build packet for the daemon */
+    if(NS_TIMESTAMP_LENGTH > sizeof(time_t)) {
+      ns_log_warning("NS_TIMESTAMP_LENGTH (%d) is too small to hold the used time object (%d)!",
+            NS_TIMESTAMP_LENGTH, sizeof(time_t));
+    } 
+    time_t now;
+    now = time(NULL);
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
+    memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], &now, sizeof(time_t));
     
-    /* Encrypt package for receiver, tmp-key + sender-id */
-    ns_encrypt((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
+    /* Encrypt package for receiver, tmp-key + sender-id + timestamp */
+    ns_encrypt_pkcs7((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
         sizeof(r_packet), NS_RIN_KEY_LENGTH);
     
     char altered_nonce[NS_NONCE_LENGTH] = { 0 };
     ns_alter_nonce(nonce, altered_nonce);
     
+    /* Build packet for client */
     int pos = 0;
     memcpy(s_packet, altered_nonce, NS_NONCE_LENGTH);
     pos += NS_NONCE_LENGTH;
@@ -466,12 +470,12 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     pos += NS_IDENTITY_LENGTH;
     memcpy(&s_packet[pos], tmp_key, NS_KEY_LENGTH);
     pos += NS_KEY_LENGTH;
-    memcpy(&s_packet[pos], enc_r_packet, NS_KEY_LENGTH + NS_IDENTITY_LENGTH);
+    memcpy(&s_packet[pos], enc_r_packet, sizeof(enc_r_packet));
     
     out_buffer[0] = NS_STATE_KEY_RESPONSE;
-    
+
     /* Encrypt package for sender */
-    ns_encrypt((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
+    ns_encrypt_pkcs7((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
         sizeof(s_packet), NS_RIN_KEY_LENGTH);
     
     context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
@@ -490,23 +494,23 @@ void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
   char altered_nonce[NS_NONCE_LENGTH] = { 0 };
   char partner_identity[NS_IDENTITY_LENGTH] = { 0 };
   char com_key[NS_KEY_LENGTH] = { 0 };
-  char partner_packet[NS_KEY_LENGTH+NS_IDENTITY_LENGTH] = { 0 };
+  char partner_packet[NS_ENC_COM_REQ_LENGTH] = { 0 };
 
-  char dec_packet[NS_NONCE_LENGTH+2*NS_IDENTITY_LENGTH+2*NS_KEY_LENGTH];
+  char dec_packet[NS_ENC_KEY_RESPONSE_LENGTH];
 
   ns_decrypt((u_char*) context->key, (u_char*) &packet[1],
           (u_char*) dec_packet, sizeof(dec_packet), NS_RIN_KEY_LENGTH);
 
   /* Get values from the decrypted packet */
   int pos = 0;
-  memcpy(altered_nonce, &dec_packet[pos], NS_NONCE_LENGTH);
-  pos += NS_NONCE_LENGTH;
-  memcpy(partner_identity, &dec_packet[pos], NS_IDENTITY_LENGTH);
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(com_key, &dec_packet[pos], NS_KEY_LENGTH);
-  pos += NS_KEY_LENGTH;
-  memcpy(partner_packet, &dec_packet[pos], NS_KEY_LENGTH+NS_IDENTITY_LENGTH);
-
+  memcpy(altered_nonce, &dec_packet[pos], sizeof(altered_nonce));
+  pos += sizeof(altered_nonce);
+  memcpy(partner_identity, &dec_packet[pos], sizeof(partner_identity));
+  pos += sizeof(partner_identity);
+  memcpy(com_key, &dec_packet[pos], sizeof(com_key));
+  pos += sizeof(com_key);
+  memcpy(partner_packet, &dec_packet[pos], sizeof(partner_packet));
+  
   ns_peer_t *partner;
   partner = ns_find_peer_by_identity(context, partner_identity);
   
@@ -528,10 +532,10 @@ void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
 
 void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet) {
   
-  char out_buffer[1+NS_KEY_LENGTH+NS_IDENTITY_LENGTH];
+  char out_buffer[1+NS_ENC_COM_REQ_LENGTH];
   
   out_buffer[0] = NS_STATE_COM_REQUEST;
-  memcpy(&out_buffer[1], packet, NS_KEY_LENGTH+NS_IDENTITY_LENGTH);
+  memcpy(&out_buffer[1], packet, NS_ENC_COM_REQ_LENGTH);
   
   ns_send_buffered(context, partner, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -542,7 +546,8 @@ void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet
 void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, ssize_t len) {
   
-  char dec_pkt[NS_KEY_LENGTH+NS_IDENTITY_LENGTH];
+  char dec_pkt[NS_ENC_COM_REQ_LENGTH];
+  char packet_time[NS_TIMESTAMP_LENGTH];
 
   ns_decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
       sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
@@ -551,6 +556,13 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
      callback when the nonce verification succeeded */
   memcpy(peer->key, dec_pkt, NS_KEY_LENGTH);
   memcpy(peer->identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
+  memcpy(packet_time, &dec_pkt[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], NS_TIMESTAMP_LENGTH);
+  
+  // Validate time. Do nothing if validation fails
+  if(ns_validate_timestamp(packet_time) != 0) {
+    ns_log_warning("received packet with expired timestamp, discarding it.");
+    return;
+  }
   
 #ifdef NSDEBUG
   // FIXME shorter way to print these as strings?
@@ -837,6 +849,26 @@ void ns_cleanup(ns_context_t *context) {
     }
   }
 #endif /* CONTIKI */
+}
+
+/**
+ * Validate a timestamp, which is stored where \p timestamp points at.
+ */
+int ns_validate_timestamp(char* timestamp) {
+
+  time_t packet_timestamp;
+  memcpy(&packet_timestamp, timestamp, sizeof(time_t));
+  
+  time_t now;
+  time(&now);
+  
+  double diff = difftime(now, packet_timestamp);
+  
+  if(diff > NS_KEY_LIFETIME) {
+    return -1;
+  } else {
+    return 0;
+  }
 }
 
 /**
