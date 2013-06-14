@@ -1,5 +1,5 @@
 /**
- * simple Needham-Schroeder implementation
+ * simple extended Needham-Schroeder implementation
  *
  * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
  *
