@@ -578,13 +578,13 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
 
 void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
   
-  char out_buffer[1 + NS_NONCE_LENGTH] = { 0 };
+  char out_buffer[1 + NS_ENC_COM_CHALLENGE_LENGTH] = { 0 };
 
   out_buffer[0] = NS_STATE_COM_CHALLENGE;
   
   ns_random_key(peer->nonce, NS_NONCE_LENGTH);
   
-  ns_encrypt((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
+  ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
   
   context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
@@ -601,23 +601,23 @@ void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
   ns_log_debug("received com challenge");
   context->state = NS_STATE_COM_CHALLENGE;
   
-  char dec_nonce[NS_NONCE_LENGTH] = { 0 };
-
-  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1],
-        (u_char*) dec_nonce, sizeof(dec_nonce), NS_KEY_LENGTH);
+  char dec_packet[NS_ENC_COM_CHALLENGE_LENGTH];
   
+  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1],
+        (u_char*) dec_packet, sizeof(dec_packet), NS_KEY_LENGTH);
+
   char altered_nonce[NS_NONCE_LENGTH] = { 0 };
-  ns_alter_nonce(dec_nonce, altered_nonce);
+  ns_alter_nonce(dec_packet, altered_nonce);
 
   ns_send_com_response(context, peer, altered_nonce);
 }
 
 void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
   
-  char out_buffer[1+NS_NONCE_LENGTH] = { 0 };
+  char out_buffer[1+NS_ENC_COM_RESPONSE_LENGTH] = { 0 };
   out_buffer[0] = NS_STATE_COM_RESPONSE;
   
-  ns_encrypt((u_char*) peer->key, (u_char*) nonce, (u_char*) &out_buffer[1],
+  ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) nonce, (u_char*) &out_buffer[1],
       NS_NONCE_LENGTH, NS_KEY_LENGTH);
       
   ns_send_buffered(context, peer, (uint8_t*) out_buffer, sizeof(out_buffer));
@@ -629,14 +629,14 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, ssize_t len) {
 
-  char received_nonce[NS_NONCE_LENGTH];
+  char dec_packet[NS_ENC_COM_RESPONSE_LENGTH];
   
-  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) received_nonce,
-      sizeof(received_nonce), NS_KEY_LENGTH);
+  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) dec_packet,
+      sizeof(dec_packet), NS_KEY_LENGTH);
 
   /* only store the key if the nonce verification succeded. otherwise the peer
      will be deleted without storing any credentials */
-  if(ns_verify_nonce(peer->nonce, received_nonce) == 0) {
+  if(ns_verify_nonce(peer->nonce, dec_packet) == 0) {
     context->handler->store_key(peer->identity, peer->key);
     ns_send_com_confirm(context, peer);
     ns_log_info("completed ns-handshake and stored new key.");

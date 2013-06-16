@@ -17,27 +17,19 @@ The library has been tested with Debian/Linux Systems and OS X. Basic compatibil
 * The client will connect to the server and daemon and perform the key exchange.
 * See the examples code and `needham.h` for further informations and configuration.
 
-It is intended, that the user may choose the lengths for identities, nonces and keys. With the current implementation there are the following limitations:
+## Configuration
 
-* All of these 4 values must be multiples of 16. This is due to the blocksize of the used rijndael implementation and missing padding
-* The key length for the Needham-Schroeder process must be exactly 16 due to the used rijndael library. If you want to use other key lengths make sure to overwrite the `encrypt` and `decrypt` functions.
-
-The length definitions can be found in `needham.h`:
-
-    #define NS_KEY_LENGTH 16
-    #define NS_RIN_KEY_LENGTH 16
-    #define NS_IDENTITY_LENGTH 16
-    #define NS_NONCE_LENGTH 16
-
-Where `NS_RIN_KEY_LENGTH` is the key used for the Needham-Schroeder-process itself and `NS_KEY_LENGTH` the negotiated key used later on in some other protocol.
+It is intended, that the user may choose lengths for all attributes of the NS-protocol (e.g. The length of identities, nonces and keys). While those for identities and nonces can be freely chosen, the lengths of the keys must be 16 Bytes for use with the Rijndael-implementation. If you want to use other key lengths make sure to overwrite `ns_encrypt_pkcs7`, `ns_encrypt` and `ns_decrypt` and set the values for `NS_BLOCKSIZE`, `NS_KEY_LENGTH` and `NS_RIN_KEY_LENGTH`.
 
 The NS-client performs retransmissions to deal with lossy networks. To adjust its parameters change `NS_RETRANSMIT_TIMEOUT` and `NS_RETRANSMIT_MAX` accordingly.
+
+See `needham.h` for a description of all modifiable values.
 
 ## TODOs
 
 * Implement tests!
 * Improve Contiki compatibility
-* Implement padding and other encryption methods
+* Implement other encryption methods
 * Check cleanups
 * Vary the timeout of retransmissions
 
