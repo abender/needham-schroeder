@@ -1,24 +1,28 @@
 CC:=gcc
 CFLAGS:=-Wall -g -DWITH_AES_DECRYPT -DNSDEBUG
-SOURCES:= needham.c ns_util.c rin_wrapper.c rijndael/rijndael.c sha2/sha2.c
-OBJECTS:= $(patsubst %.c, %.o, $(SOURCES))
+SOURCES:= needham.c ns_util.c rin_wrapper.c
+OBJECTS:= $(patsubst %.c, %.o, $(SOURCES)) rijndael/rijndael.o sha2/sha2.o
 HEADERS:= needham.h ns_util.h rin_wrapper.h
 LIB:=libneedham.a
-EXAMPLES:=examples
+SUBDIRS:=rijndael sha2 examples
 ARFLAGS:=cru
 
-.PHONY: clean all $(EXAMPLES)
+.PHONY: clean all dirs
 
-all: $(LIB) $(EXAMPLES)
+all: $(LIB) dirs
+
+dirs:	$(SUBDIRS)
+	for dir in $^; do \
+		$(MAKE) -C $$dir ; \
+	done
 
 $(LIB): $(OBJECTS)
 	$(AR) $(ARFLAGS) $@ $^ 
 	ranlib $@
 
-$(EXAMPLES): $(LIB)
-	$(MAKE) -C $(EXAMPLES)
-
 clean:
 	@rm -f $(OBJECTS) $(LIB)
-	$(MAKE) -C $(EXAMPLES) clean
+	for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir clean ; \
+	done
   

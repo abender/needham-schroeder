@@ -71,24 +71,25 @@ typedef unsigned int clock_time_t;
 #define NS_NONCE_LENGTH 16    // Nonce length used in Needham-Schroeder
 #define NS_TIMESTAMP_LENGTH 8 // Length of the timestamp used to validate messages
 
-/* Calculate the length that is needed for a block to match multiples of NS_BLOCKSIZE */
-#define ns_calc_padded_length(length) \
-  (((length) % NS_BLOCKSIZE == 0) ? (length) : ((length) - ((length) % NS_BLOCKSIZE) + NS_BLOCKSIZE))
+/* Calculate the length that is needed for a block of \p len Bytes to match
+   multiples of NS_BLOCKSIZE */
+#define ns_padded_length(len) \
+  (((len) % NS_BLOCKSIZE == 0) ? (len) : ((len) - ((len) % NS_BLOCKSIZE) + NS_BLOCKSIZE))
 
 /* Message sizes */
    
 #define NS_ENC_COM_REQ_LENGTH \
-  (ns_calc_padded_length(NS_KEY_LENGTH+NS_IDENTITY_LENGTH+NS_TIMESTAMP_LENGTH))
+  (ns_padded_length(NS_KEY_LENGTH+NS_IDENTITY_LENGTH+NS_TIMESTAMP_LENGTH))
 
 #define NS_ENC_KEY_RESPONSE_LENGTH \
-  (ns_calc_padded_length(NS_NONCE_LENGTH + NS_IDENTITY_LENGTH + NS_KEY_LENGTH + \
+  (ns_padded_length(NS_NONCE_LENGTH + NS_IDENTITY_LENGTH + NS_KEY_LENGTH + \
    NS_ENC_COM_REQ_LENGTH))
 
 #define NS_ENC_COM_CHALLENGE_LENGTH \
-  (ns_calc_padded_length(NS_NONCE_LENGTH))
+  (ns_padded_length(NS_NONCE_LENGTH))
 
 #define NS_ENC_COM_RESPONSE_LENGTH \
-  (ns_calc_padded_length(NS_NONCE_LENGTH))
+  (ns_padded_length(NS_NONCE_LENGTH))
 
 #define NS_KEY_REQUEST_LENGTH 1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH
 
@@ -139,6 +140,7 @@ typedef struct {
   uip_ipaddr_t addr;
   unsigned short port;
 } ns_abstract_address_t;
+
 #else /* CONTIKI */
 /* IPv4/IPv6 Address abstraction */
 typedef struct {

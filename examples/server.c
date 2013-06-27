@@ -34,6 +34,11 @@ int get_key(char *identity_name, char *key) {
     memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
     return 0;
     
+  } else if(strcmp(identity_name, "rd_12345") == 0) {
+    char *daemon_key = "1111111111222222";
+    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    return 0;
+    
   } else {
     return -1;
   }
@@ -78,7 +83,7 @@ int main(int argc, char **argv) {
 
   ns_set_role(context, NS_ROLE_SERVER);
   
-  ns_log_info("Server running, waiting for key requests.");
+  ns_log_info("Server running (port: %d), waiting for key requests.", port);
   
   while(1) {
     read_bytes = recvfrom(fd, in_buffer, sizeof(in_buffer), 0, &tmp_addr.addr.sa, &tmp_addr.size);
