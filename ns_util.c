@@ -28,6 +28,12 @@
 
 void ns_random_key(char *dst, size_t length) {
   
+  /* FIXME these are only 84 possibilities for each key charakter, so with a
+     total of 16 Bytes Key-length, the actual possibilites are
+     84^16 =~ 6 * 10^30 instead of 256^16 =~ 3 * 10^38.
+     
+     This is done for testing purposes and easy human readable keys and needs
+     to be changed for productive environments! */
   const char key_characters[] = {
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
     'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',

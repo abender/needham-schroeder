@@ -35,6 +35,12 @@
 #ifndef __SHA2_H__
 #define __SHA2_H__
 
+/* Contiki minimal-net fix */
+#ifdef CONTIKI_TARGET_MINIMAL_NET
+#undef HAVE_ASSERT_H
+#define assert(x)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,7 +58,6 @@ extern "C" {
 #include <inttypes.h>
 
 #endif /* SHA2_USE_INTTYPES_H */
-
 
 /*** SHA-256/384/512 Various Length Definitions ***********************/
 #define SHA256_BLOCK_LENGTH		64

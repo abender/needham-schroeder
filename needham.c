@@ -237,7 +237,7 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin6_family = AF_INET6;
     listen_addr.sin6_port = htons(port);
     listen_addr.sin6_addr = in6addr_any;
-    /* FIXME cleanup */
+    // FIXME cleanup
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
       ns_log_fatal("Could not bind socket: %s", strerror(errno));
       exit(-1);
@@ -251,7 +251,7 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_port = htons(port);
     listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    /* FIXME cleanup */
+    // FIXME cleanup
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
       ns_log_fatal("Could not bind socket: %s", strerror(errno));
       exit(-1);
@@ -389,8 +389,8 @@ void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *pe
 }
 
 /*
- * Handle a key request coming from \p socket . The packet is stored in \p in_buffer
- * and the sender in \p peer .
+ * Handle a key request from \p peer. The packet is stored in \p in_buffer with
+ * length \p len.
  */
 void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
        char *in_buffer, ssize_t len) {
@@ -448,7 +448,9 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     if(NS_TIMESTAMP_LENGTH > sizeof(time_t)) {
       ns_log_warning("NS_TIMESTAMP_LENGTH (%d) is too small to hold the used time object (%d)!",
             NS_TIMESTAMP_LENGTH, sizeof(time_t));
-    } 
+    }
+    // FIXME check byte-ordering, time_t is usually a long that needs to be
+    // converted to network-byte-order and back on retrieval.
     time_t now;
     now = time(NULL);
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
@@ -556,9 +558,10 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
      callback when the nonce verification succeeded */
   memcpy(peer->key, dec_pkt, NS_KEY_LENGTH);
   memcpy(peer->identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
+  // FIXME check byte-ordering
   memcpy(packet_time, &dec_pkt[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], NS_TIMESTAMP_LENGTH);
   
-  // Validate time. Do nothing if validation fails
+  /* Validate time. Do nothing if validation fails */
   if(ns_validate_timestamp(packet_time) != 0) {
     ns_log_warning("received packet with expired timestamp, discarding it.");
     return;
@@ -644,9 +647,9 @@ void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
     ns_log_info("nonce verification failed");
   }
 
-  /* mark this peer as completed. if the client doesn't send any further message
-     within some time (depending on retransmit timeout and number of retransmits)
-     it will be cleaned up */
+  /* Mark this peer as completed. If the client receives the com confirm message
+     it won't send any further messages and the peer can be cleaned up after
+     this timeout. */
   peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
 }
 
@@ -903,6 +906,14 @@ int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len) {
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key) {
   
+#ifdef NSDEBUG
+  if(identity == NULL)
+    ns_log_error("identity is NULL");
+    
+  if(key == NULL)
+    ns_log_error("key is NULL");
+#endif
+
   memcpy(context->identity, identity, NS_IDENTITY_LENGTH);
   memcpy(context->key, key, NS_RIN_KEY_LENGTH);
 }
