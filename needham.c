@@ -453,6 +453,7 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     // converted to network-byte-order and back on retrieval.
     time_t now;
     now = time(NULL);
+
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], &now, sizeof(time_t));
@@ -460,7 +461,7 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     /* Encrypt package for receiver, tmp-key + sender-id + timestamp */
     ns_encrypt_pkcs7((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
         sizeof(r_packet), NS_RIN_KEY_LENGTH);
-    
+        
     char altered_nonce[NS_NONCE_LENGTH] = { 0 };
     ns_alter_nonce(nonce, altered_nonce);
     
@@ -482,8 +483,8 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     
     context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
     
-    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s )",
-        id_sender, id_receiver, tmp_key);
+    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s)",
+      id_sender, id_receiver, tmp_key);
     
   }
 }
@@ -550,7 +551,7 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
   
   char dec_pkt[NS_ENC_COM_REQ_LENGTH];
   char packet_time[NS_TIMESTAMP_LENGTH];
-
+  
   ns_decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
       sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
     

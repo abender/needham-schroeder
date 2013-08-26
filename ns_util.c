@@ -24,25 +24,34 @@
 
 #include "ns_util.h"
 
+/* FIXME these are only 84 possibilities for each key charakter, so with a
+   total of 16 Bytes Key-length, the actual possibilites are
+   84^16 =~ 6 * 10^30 instead of 256^16 =~ 3 * 10^38.
+   
+   This is done for testing purposes and easy human readable keys and needs
+   to be changed for productive environments! */
+
+static const char ns_key_characters[] = {
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+  'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+  '@', '<', '>', '(', ')', '{', '}', '/', '!', '?', '$', '%', '&', '#', '*',
+  '-', '+', '.', ',', ';', ':', '_' };
+
+static const char ns_identity_characters[] = {
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+  'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+  '@' };
+
 /* ---------------------------- Random Stuff ------------------------------- */
 
-void ns_random_key(char *dst, size_t length) {
-  
-  /* FIXME these are only 84 possibilities for each key charakter, so with a
-     total of 16 Bytes Key-length, the actual possibilites are
-     84^16 =~ 6 * 10^30 instead of 256^16 =~ 3 * 10^38.
-     
-     This is done for testing purposes and easy human readable keys and needs
-     to be changed for productive environments! */
-  const char key_characters[] = {
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
-    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-    '@', '<', '>', '(', ')', '{', '}', '/', '!', '?', '$', '%', '&', '#', '*',
-    '-', '+', '.', ',', ';', ':', '_' };
-  
+static void ns_random(char *dst, size_t length, char *chars, size_t chars_len) {
+
   FILE *file;
   char line[length];
   memset(line, 0, sizeof(char) * sizeof(line));
@@ -50,7 +59,7 @@ void ns_random_key(char *dst, size_t length) {
   file = fopen(NS_RANDOM_PATH, "r");
   if(file == NULL) {
     ns_log_fatal("Unable to open \"%s\" which is needed to generate "
-        "random keys.", NS_RANDOM_PATH);
+        "randoms.", NS_RANDOM_PATH);
     exit(EXIT_FAILURE);
   }
   
@@ -62,9 +71,21 @@ void ns_random_key(char *dst, size_t length) {
   
   int i;
   for(i = 0; i < length; i++) {
-    dst[i] = key_characters[line[i] % sizeof(key_characters)];
+    dst[i] = chars[line[i] % chars_len];
   }
   fclose(file);
+}
+
+void ns_random_identity(char *dst, size_t length) {
+  
+  ns_random(dst, length, ns_identity_characters, sizeof(ns_identity_characters));
+  
+}
+
+void ns_random_key(char *dst, size_t length) {
+
+  ns_random(dst, length, ns_key_characters, sizeof(ns_key_characters));
+
 }
 
 /* ------------------------------- Logging --------------------------------- */

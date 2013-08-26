@@ -42,6 +42,12 @@
  */
 void ns_random_key(char *dst, size_t length);
 
+/*
+ * Creates a random identity of \p length Bytes and stores it in \p dst .
+ * Uses a different set of characters to create identities.
+ */
+void ns_random_identity(char *dst, size_t length);
+
 /* ------------------------------- Logging --------------------------------- */
 
 #define NS_LOG_LEVEL 0

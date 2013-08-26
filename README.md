@@ -30,6 +30,7 @@ See `needham.h` for a description of all modifiable values.
 * Implement tests!
 * Improve Contiki compatibility
 * Implement other encryption methods
+* Transmission error detection
 * Check cleanups
 * Vary the timeout of retransmissions
 
