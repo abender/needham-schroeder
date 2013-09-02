@@ -29,8 +29,11 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
+
+#ifndef CONTIKI
 #include <sys/socket.h>
 #include <netdb.h>
+#endif /* CONTIKI */
 
 #include "rin_wrapper.h"
 #include "sha2/sha2.h"
@@ -55,37 +58,37 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
 #endif /* CONTIKI */
 
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
-      char *buf, ssize_t len);
+      char *buf, size_t len);
       
 void ns_send_buffered(ns_context_t *context, ns_peer_t *peer, uint8_t *data, size_t len);
 
 void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *peer);
 
 void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len);
+      char *in_buffer, size_t len);
 
 void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
-      char *packet, ssize_t len);
+      char *packet, size_t len);
 
 void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet);
 
 void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len);
+      char *in_buffer, size_t len);
 
 void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer);
 
 void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len);
+      char *in_buffer, size_t len);
 
 void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce);
 
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len);
+      char *in_buffer, size_t len);
 
 void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer);
 
 void ns_handle_com_confirm(ns_context_t *context, ns_peer_t *peer,
-      char *packet, ssize_t len);
+      char *packet, size_t len);
 
 void ns_handle_err_unknown_id(ns_context_t *context);
 
@@ -110,7 +113,7 @@ void ns_cleanup(ns_context_t *context);
 
 int ns_validate_timestamp(char* timestamp);
 
-int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len);
+int ns_discard_invalid_messages(ns_context_t *context, char *buf, size_t len);
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key);
 
@@ -309,7 +312,7 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
 #endif /* CONTIKI */
 
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
-      char *buf, ssize_t len) {
+      char *buf, size_t len) {
 
   /* clean up marked peers */
   ns_cleanup(context);
@@ -393,7 +396,7 @@ void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *pe
  * length \p len.
  */
 void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
-       char *in_buffer, ssize_t len) {
+       char *in_buffer, size_t len) {
   
   int get_sender, get_receiver;
   
@@ -490,7 +493,7 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
 }
 
 void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
-       char *packet, ssize_t len) {
+       char *packet, size_t len) {
   
   ns_reset_buffer(server);
   
@@ -547,7 +550,7 @@ void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet
 }
 
 void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len) {
+      char *in_buffer, size_t len) {
   
   char dec_pkt[NS_ENC_COM_REQ_LENGTH];
   char packet_time[NS_TIMESTAMP_LENGTH];
@@ -598,7 +601,7 @@ void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
 }
 
 void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
-       char *in_buffer, ssize_t len) {
+       char *in_buffer, size_t len) {
   
   ns_reset_buffer(peer);
   
@@ -631,7 +634,7 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
 }
 
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
-      char *in_buffer, ssize_t len) {
+      char *in_buffer, size_t len) {
 
   char dec_packet[NS_ENC_COM_RESPONSE_LENGTH];
   
@@ -665,7 +668,7 @@ void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer) {
 }
 
 void ns_handle_com_confirm(ns_context_t *context, ns_peer_t *peer,
-       char *packet, ssize_t len) {
+       char *packet, size_t len) {
   
   ns_reset_buffer(peer);
   
@@ -879,7 +882,7 @@ int ns_validate_timestamp(char* timestamp) {
  * Validates the message code and discards messages that don't fit the applications
  * role.
  */
-int ns_discard_invalid_messages(ns_context_t *context, char *buf, ssize_t len) {
+int ns_discard_invalid_messages(ns_context_t *context, char *buf, size_t len) {
   
   char code = buf[0];
   ns_role_t role = context->role;

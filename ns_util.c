@@ -24,8 +24,14 @@
 
 #include "ns_util.h"
 
+#ifdef CONTIKI
+#include "lib/random.h"
+#endif /* CONTIKI */
+
+
 /* ---------------------------- Random Stuff ------------------------------- */
 
+#ifndef CONTIKI
 static void ns_random(char *dst, size_t length, const char *chars, size_t chars_len) {
 
   FILE *file;
@@ -36,13 +42,13 @@ static void ns_random(char *dst, size_t length, const char *chars, size_t chars_
   if(file == NULL) {
     ns_log_fatal("Unable to open \"%s\" which is needed to generate "
         "randoms.", NS_RANDOM_PATH);
-    exit(EXIT_FAILURE);
+    exit(-1); /* FIXME: proper handling */
   }
   
   if(fgets(line, length+1, file) == NULL) {
     ns_log_fatal("Couldn't get enough characters from \"%s\" to "
       "create the random key.", NS_RANDOM_PATH);
-    exit(EXIT_FAILURE);
+    exit(-1);  /* FIXME: proper handling */
   }
   
   int i;
@@ -51,6 +57,18 @@ static void ns_random(char *dst, size_t length, const char *chars, size_t chars_
   }
   fclose(file);
 }
+#else /* CONTIKI */
+static void ns_random(char *dst, size_t length, const char *chars, size_t chars_len) {
+  
+  unsigned short ran;
+  char *p = dst;
+  while(p - dst < length) {
+    ran = random_rand();
+    memcpy(p, &chars[(ran % chars_len)], 1);
+    p++;
+  }
+}
+#endif /* CONTIKI */
 
 void ns_random_identity(char *dst, size_t length) {
   
@@ -91,7 +109,8 @@ void ns_random_key(char *dst, size_t length) {
 /* ------------------------------- Logging --------------------------------- */
 
 void ns_simple_log(int level, int app_level, char *msg, ...) {
-  
+
+#ifndef CONTIKI
   if(app_level <= level) {
     
     char *levels[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
@@ -105,6 +124,29 @@ void ns_simple_log(int level, int app_level, char *msg, ...) {
   
     fflush(stdout);
   }
+#else /* CONTIKI */
+
+#define LOG_BUFLEN 150
+  if(app_level <= level) {
+    va_list args;
+    int bytes_written = 0;
+    char log_buf[LOG_BUFLEN];
+
+    memset(log_buf, 0, LOG_BUFLEN);
+  
+    va_start(args, msg);
+    bytes_written = vsnprintf(log_buf, LOG_BUFLEN, msg, args);
+  
+    /* indicate if log was truncated due to a small log buffer */
+    if(bytes_written > LOG_BUFLEN)
+      memcpy(log_buf + LOG_BUFLEN - 14, " (truncated)\n", 13);
+    
+    va_end(args);
+#undef LOG_BUFLEN
+    printf("%s\n", log_buf);
+  }
+
+#endif /* CONTIKI */
 }
 
 void ns_dump_bytes_to_hex(char *bytes, size_t length) {
@@ -136,5 +178,4 @@ void ns_dump_byte_to_bin(char *b) {
   for(i = 7; i >= 0; i--) {
     printf("%d", ((*b & (1 << i)) != 0));
   }
-  fflush(stdout);
 }

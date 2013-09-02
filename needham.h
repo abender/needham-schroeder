@@ -27,11 +27,16 @@
 
 #include <sys/types.h>
 #include <sys/time.h>
+
+#ifndef CONTIKI
 #include <netinet/in.h>
+#endif /* CONTIKI */
+
 #include <time.h>
 #include <inttypes.h>
 
 #include "ns_util.h"
+
 
 #ifndef CONTIKI
 
@@ -286,7 +291,7 @@ void ns_free_context(ns_context_t *context);
  * @param len The message content length
  */
 void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
-      char *buf, ssize_t len);
+      char *buf, size_t len);
       
 /**
  * Set credentials for the application, only needed for the client and daemon

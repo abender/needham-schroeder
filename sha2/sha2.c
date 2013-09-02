@@ -32,7 +32,17 @@
  */
 
 #include <string.h>	/* memcpy()/memset() or bcopy()/bzero() */
-#include <assert.h>	/* assert() */
+
+/* disable assertions for wismotes */
+#ifdef CONTIKI_TARGET_WISMOTE
+#ifndef assert
+#warning "assertions are disabled"
+#  define assert(x)
+#endif
+#else
+#include <assert.h>
+#endif
+
 #include "sha2.h"
 
 /*
