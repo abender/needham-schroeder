@@ -240,7 +240,7 @@ typedef struct ns_context_t {
 #endif /* CONTIKI */
   
   void *app; /* Socket fd for Unix Systems or uip_udp_conn for Contiki */
-  char nonce[NS_NONCE_LENGTH];
+  char nonce[NS_NONCE_LENGTH]; // FIXME: nonce not necessary here? nonce is stored per peer
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_KEY_LENGTH];
   ns_role_t role;

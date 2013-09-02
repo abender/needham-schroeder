@@ -30,8 +30,6 @@
 #include <string.h>
 #include <stdarg.h>
 #include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 /* ---------------------------- Random Stuff ------------------------------- */
 
@@ -70,8 +68,6 @@ void ns_dump_bytes_to_bin(char *bytes, size_t length);
 void ns_dump_byte_to_hex(char *b);
 
 void ns_dump_byte_to_bin(char *b);
-
-void print_sockaddr(const struct sockaddr *addr);
 
 char* ns_stringify(char *b, int len);
 

@@ -24,33 +24,9 @@
 
 #include "ns_util.h"
 
-/* FIXME these are only 84 possibilities for each key charakter, so with a
-   total of 16 Bytes Key-length, the actual possibilites are
-   84^16 =~ 6 * 10^30 instead of 256^16 =~ 3 * 10^38.
-   
-   This is done for testing purposes and easy human readable keys and needs
-   to be changed for productive environments! */
-
-static const char ns_key_characters[] = {
-  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
-  'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  '@', '<', '>', '(', ')', '{', '}', '/', '!', '?', '$', '%', '&', '#', '*',
-  '-', '+', '.', ',', ';', ':', '_' };
-
-static const char ns_identity_characters[] = {
-  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
-  'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  '@' };
-
 /* ---------------------------- Random Stuff ------------------------------- */
 
-static void ns_random(char *dst, size_t length, char *chars, size_t chars_len) {
+static void ns_random(char *dst, size_t length, const char *chars, size_t chars_len) {
 
   FILE *file;
   char line[length];
@@ -78,11 +54,35 @@ static void ns_random(char *dst, size_t length, char *chars, size_t chars_len) {
 
 void ns_random_identity(char *dst, size_t length) {
   
+  const char ns_identity_characters[] = {
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    '@' };
+  
   ns_random(dst, length, ns_identity_characters, sizeof(ns_identity_characters));
   
 }
 
 void ns_random_key(char *dst, size_t length) {
+
+/* FIXME these are only 84 possibilities for each key charakter, so with a
+   total of 16 Bytes Key-length, the actual possibilites are
+   84^16 =~ 6 * 10^30 instead of 256^16 =~ 3 * 10^38.
+   
+   This is done for testing purposes and easy human readable keys and needs
+   to be changed for productive environments! */
+
+  const char ns_key_characters[] = {
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    '@', '<', '>', '(', ')', '{', '}', '/', '!', '?', '$', '%', '&', '#', '*',
+    '-', '+', '.', ',', ';', ':', '_' };
 
   ns_random(dst, length, ns_key_characters, sizeof(ns_key_characters));
 
@@ -138,60 +138,3 @@ void ns_dump_byte_to_bin(char *b) {
   }
   fflush(stdout);
 }
-
-void print_sockaddr(const struct sockaddr *addr) {
-  
-  if(addr == NULL) return;
-  
-  void *numeric;
-  char buf[INET6_ADDRSTRLEN] = {0};
-  
-  int port = 0;
-  
-  switch(addr->sa_family) {
-    case AF_INET:
-      numeric = &((struct sockaddr_in *) addr)->sin_addr;
-      port = ntohs(((struct sockaddr_in *) addr)->sin_port);
-      break;
-    case AF_INET6:
-      numeric = &((struct sockaddr_in6 *) addr)->sin6_addr;
-      port = ntohs(((struct sockaddr_in6 *) addr)->sin6_port);
-      break;
-    default:
-      printf("unknown address-type.");
-      return;
-  }
-  
-  if(inet_ntop(addr->sa_family, numeric, buf, sizeof(buf)) == NULL) {
-    printf("conversion error.");
-  } else {
-    if(addr->sa_family == AF_INET) {
-      printf("%s", buf);
-    } else { // AF_INET6
-      printf("[%s]", buf);
-    }
-
-    if(port != 0) printf(":%u", port);
-  }
-  
-}
-
-/**
- * DIRTY!!! only for quick debugging
- */
-char* ns_stringify(char *d, int len) {
-  char *r = (char*) malloc(100);
-  memset(r, 0, 100);
-  memcpy(r, d, len);
-  return r;
-}
-
-
-
-
-
-
-
-
-
-
