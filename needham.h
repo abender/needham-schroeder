@@ -26,10 +26,12 @@
 #define _NEEDHAM_SCHROEDER_H_
 
 #include <sys/types.h>
-#include <sys/time.h>
 
 #ifndef CONTIKI
+
+#include <sys/time.h>
 #include <netinet/in.h>
+
 #endif /* CONTIKI */
 
 #include <time.h>
@@ -219,15 +221,16 @@ typedef struct {
 typedef struct {
 #ifndef CONTIKI
   UT_hash_handle hh;
+  time_t expires;
 #else /* CONTIKI */
   struct ns_peer_t *next;
+  unsigned long expires;
 #endif /* CONTIKI */
   ns_abstract_address_t addr;
   char nonce[NS_NONCE_LENGTH];
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_KEY_LENGTH];
   int state;
-  time_t expires;
   uint8_t *msg_buf; /* buffer for messages, used for retransmissions */
   size_t msg_buf_len; /* length of the retransmission buffer */
   int retransmits; /* number of performed retransmissions */

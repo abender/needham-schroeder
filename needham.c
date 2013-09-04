@@ -111,6 +111,8 @@ void ns_reset_peer(ns_peer_t *peer);
 
 void ns_cleanup(ns_context_t *context);
 
+void ns_create_timestamp(char* timestamp);
+
 int ns_validate_timestamp(char* timestamp);
 
 int ns_discard_invalid_messages(ns_context_t *context, char *buf, size_t len);
@@ -122,6 +124,10 @@ ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler);
 void ns_free_context(ns_context_t *context);
 
 void ns_free_peers(ns_context_t *context);
+
+uint64_t htonll(uint64_t val);
+
+uint64_t ntohll(uint64_t val);
 
 /* -------------------------------- #0 Common ------------------------------ */
 
@@ -452,14 +458,14 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
       ns_log_warning("NS_TIMESTAMP_LENGTH (%d) is too small to hold the used time object (%d)!",
             NS_TIMESTAMP_LENGTH, sizeof(time_t));
     }
-    // FIXME check byte-ordering, time_t is usually a long that needs to be
-    // converted to network-byte-order and back on retrieval.
-    time_t now;
-    now = time(NULL);
+
+    /* create the timestamp in network-byte-order */
+    char timestamp[NS_TIMESTAMP_LENGTH];
+    ns_create_timestamp(timestamp);
 
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
-    memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], &now, sizeof(time_t));
+    memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], timestamp, sizeof(timestamp));
     
     /* Encrypt package for receiver, tmp-key + sender-id + timestamp */
     ns_encrypt_pkcs7((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
@@ -562,7 +568,6 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
      callback when the nonce verification succeeded */
   memcpy(peer->key, dec_pkt, NS_KEY_LENGTH);
   memcpy(peer->identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
-  // FIXME check byte-ordering
   memcpy(packet_time, &dec_pkt[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], NS_TIMESTAMP_LENGTH);
   
   /* Validate time. Do nothing if validation fails */
@@ -654,7 +659,11 @@ void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
   /* Mark this peer as completed. If the client receives the com confirm message
      it won't send any further messages and the peer can be cleaned up after
      this timeout. */
+#ifndef CONTIKI
   peer->expires = time(NULL) + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
+#else
+  peer->expires = clock_seconds() + (NS_RETRANSMIT_TIMEOUT * NS_RETRANSMIT_MAX * 2);
+#endif /* CONTIKI */
 }
 
 void ns_send_com_confirm(ns_context_t *context, ns_peer_t *peer) {
@@ -839,9 +848,11 @@ void ns_cleanup(ns_context_t *context) {
   
   ns_peer_t *peer;
 
+ /* delete expired peers */
+
 #ifdef CONTIKI
   for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
-    if(peer->expires != 0 && peer->expires < time(NULL)) {
+    if(peer->expires != 0 && peer->expires < clock_seconds()) {
       list_remove(context->peers, peer);
       free(peer);
     }
@@ -849,7 +860,6 @@ void ns_cleanup(ns_context_t *context) {
 #else /* CONTIKI */
   ns_peer_t *tmp;
   HASH_ITER(hh, context->peers, peer, tmp) {
-    /* peer is marked to be deleted and live time expired */
     if(peer->expires != 0 && peer->expires < time(NULL)) {
       HASH_DEL(context->peers, peer);
       free(peer);
@@ -859,19 +869,42 @@ void ns_cleanup(ns_context_t *context) {
 }
 
 /**
+ * Create a 8-bytes timestamp in network-byte-order
+ */
+void ns_create_timestamp(char* timestamp) {
+
+  uint64_t now; /* should be big enough for every reasonable timestamp */
+  
+#ifndef CONTIKI
+  time_t t;
+  t = time(NULL);
+  now = htonll((uint64_t) t);
+#else
+  unsigned long t;
+  t = clock_seconds();
+  now = htonll((uint64_t) t);
+#endif /* CONTIKI */
+
+  memcpy(timestamp, &now, sizeof(uint64_t));
+}
+
+/**
  * Validate a timestamp, which is stored where \p timestamp points at.
+ * The timestamp should be a uint64_t in network-byte-order.
  */
 int ns_validate_timestamp(char* timestamp) {
 
-  time_t packet_timestamp;
-  memcpy(&packet_timestamp, timestamp, sizeof(time_t));
+  /* get host-byte-order timestamp */
+  uint64_t t = ntohll(*((uint64_t*) timestamp));
   
-  time_t now;
-  time(&now);
+  uint64_t now;
+#ifndef CONTIKI
+  now = (uint64_t) time(NULL);
+#else
+  now = (uint64_t) clock_seconds();
+#endif /* CONTIKI */
   
-  double diff = difftime(now, packet_timestamp);
-  
-  if(diff > NS_KEY_LIFETIME) {
+  if(now - t > NS_KEY_LIFETIME) {
     return -1;
   } else {
     return 0;
@@ -970,4 +1003,26 @@ void ns_free_peers(ns_context_t *context) {
   }
 #endif /* CONTIKI */
 
+}
+
+uint64_t htonll(uint64_t val) {
+  
+  int16_t i = 1;
+  /* host is little endian, convert from host to network-byte-order */
+  if(i & 0x10) {
+#ifndef CONTIKI
+    return (((uint64_t)htonl(val)) << 32) + htonl(val >> 32);
+#else
+    return (((uint64_t)UIP_HTONL(val)) << 32) + UIP_HTONL(val >> 32);
+#endif /* CONTIKI */
+  } else {
+    return val;
+  }
+}
+
+uint64_t ntohll(uint64_t val) {
+  
+  /* htonll flips the bytes if the host is little endian, so they can be used
+     for both cases */
+  return htonll(val);
 }
