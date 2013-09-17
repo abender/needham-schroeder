@@ -34,7 +34,7 @@
 
 #endif /* CONTIKI */
 
-#include <time.h>
+//#include <time.h>
 #include <inttypes.h>
 
 #include "ns_util.h"
@@ -76,7 +76,10 @@ typedef unsigned int clock_time_t;
 #define NS_RIN_KEY_LENGTH 16  // Length of the AES Key
 #define NS_IDENTITY_LENGTH 16 // Length of global identifiers for communication partners
 #define NS_NONCE_LENGTH 16    // Nonce length used in Needham-Schroeder
-#define NS_TIMESTAMP_LENGTH 8 // Length of the timestamp used to validate messages
+
+/* Length of the timestamp used to validate messages, must be 8 because
+   ns_create_timestamp creates an 8 bytes long timestamp. */
+#define NS_TIMESTAMP_LENGTH 8
 
 /* Calculate the length that is needed for a block of \p len Bytes to match
    multiples of NS_BLOCKSIZE */

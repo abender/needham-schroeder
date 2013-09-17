@@ -149,15 +149,15 @@ void ns_simple_log(int level, int app_level, char *msg, ...) {
 #endif /* CONTIKI */
 }
 
-void ns_dump_bytes_to_hex(char *bytes, size_t length) {
+void ns_dump_bytes_to_hex(unsigned char *bytes, size_t length) {
   int i;
   for(i = 0; i < length; i++) {
-    printf("%02x ", (u_char) bytes[i]);
+    printf("%02x ", bytes[i]);
   }
   printf("\n");
 }
 
-void ns_dump_bytes_to_bin(char *bytes, size_t length) {
+void ns_dump_bytes_to_bin(unsigned char *bytes, size_t length) {
   int i;
   for(i = 0; i < length; i++) {
     ns_dump_byte_to_bin(&bytes[i]);
@@ -169,11 +169,11 @@ void ns_dump_bytes_to_bin(char *bytes, size_t length) {
   printf("\n");
 }
 
-void ns_dump_byte_to_hex(char *b) {
+void ns_dump_byte_to_hex(unsigned char *b) {
   printf("%02x\n", *b);
 }
 
-void ns_dump_byte_to_bin(char *b) {
+void ns_dump_byte_to_bin(unsigned char *b) {
   int i;
   for(i = 7; i >= 0; i--) {
     printf("%d", ((*b & (1 << i)) != 0));

@@ -28,15 +28,21 @@
 #ifndef __RIJNDAEL_H
 #define __RIJNDAEL_H
 
+#include <stdint.h>
+
 #define AES_MAXKEYBITS	(256)
 #define AES_MAXKEYBYTES	(AES_MAXKEYBITS/8)
 /* for 256-bit keys, fewer for less */
-#define AES_MAXROUNDS	14
+#define AES_MAXROUNDS	10
 
+/* Modifications taken from tinydtls: http://tinydtls.sourceforge.net/ 
+ *
+ * bergmann: to avoid conflicts with typedefs from certain Contiki platforms,
+ * the following type names have been prefixed with "aes_": */
 typedef unsigned char	u_char;
-typedef unsigned char	u8;
-typedef unsigned short	u16;
-typedef unsigned int	u32;
+typedef uint8_t		aes_u8;
+typedef uint16_t	aes_u16;
+typedef uint32_t	aes_u32;
 
 /*  The structure for key information */
 typedef struct {
@@ -44,9 +50,9 @@ typedef struct {
 	int	enc_only;		/* context contains only encrypt schedule */
 #endif
 	int	Nr;			/* key-length-dependent number of rounds */
-	u32	ek[4*(AES_MAXROUNDS + 1)];	/* encrypt key schedule */
+	aes_u32	ek[4*(AES_MAXROUNDS + 1)];	/* encrypt key schedule */
 #ifdef WITH_AES_DECRYPT
-	u32	dk[4*(AES_MAXROUNDS + 1)];	/* decrypt key schedule */
+	aes_u32	dk[4*(AES_MAXROUNDS + 1)];	/* decrypt key schedule */
 #endif
 } rijndael_ctx;
 
@@ -55,9 +61,8 @@ int	 rijndael_set_key_enc_only(rijndael_ctx *, const u_char *, int);
 void	 rijndael_decrypt(rijndael_ctx *, const u_char *, u_char *);
 void	 rijndael_encrypt(rijndael_ctx *, const u_char *, u_char *);
 
-int	rijndaelKeySetupEnc(unsigned int [], const unsigned char [], int);
-int	rijndaelKeySetupDec(unsigned int [], const unsigned char [], int);
-void	rijndaelEncrypt(const unsigned int [], int, const unsigned char [],
-	    unsigned char []);
+int	rijndaelKeySetupEnc(aes_u32 rk[/*4*(Nr + 1)*/], const aes_u8 cipherKey[], int keyBits);
+int	rijndaelKeySetupDec(aes_u32 rk[/*4*(Nr + 1)*/], const aes_u8 cipherKey[], int keyBits);
+void	rijndaelEncrypt(const aes_u32 rk[/*4*(Nr + 1)*/], int Nr, const aes_u8 pt[16], aes_u8 ct[16]);
 
 #endif /* __RIJNDAEL_H */

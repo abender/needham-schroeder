@@ -167,9 +167,9 @@ int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
 #ifdef NSDEBUG
     ns_log_debug("--------------------");
     ns_log_debug("nonce verification failed, my altered nonce is:");
-    ns_dump_bytes_to_hex(altered_nonce, NS_NONCE_LENGTH);
+    ns_dump_bytes_to_hex((unsigned char*) altered_nonce, NS_NONCE_LENGTH);
     ns_log_debug("but the received nonce is:");
-    ns_dump_bytes_to_hex(verify_nonce, NS_NONCE_LENGTH);
+    ns_dump_bytes_to_hex((unsigned char*) verify_nonce, NS_NONCE_LENGTH);
     ns_log_debug("--------------------");
 #endif
     return -1;
@@ -454,10 +454,6 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     ns_random_key(tmp_key, NS_KEY_LENGTH);
     
     /* Build packet for the daemon */
-    if(NS_TIMESTAMP_LENGTH > sizeof(time_t)) {
-      ns_log_warning("NS_TIMESTAMP_LENGTH (%d) is too small to hold the used time object (%d)!",
-            NS_TIMESTAMP_LENGTH, sizeof(time_t));
-    }
 
     /* create the timestamp in network-byte-order */
     char timestamp[NS_TIMESTAMP_LENGTH];
@@ -878,13 +874,12 @@ void ns_create_timestamp(char* timestamp) {
 #ifndef CONTIKI
   time_t t;
   t = time(NULL);
-  now = htonll((uint64_t) t);
 #else
   unsigned long t;
   t = clock_seconds();
-  now = htonll((uint64_t) t);
 #endif /* CONTIKI */
 
+  now = htonll((uint64_t) t);
   memcpy(timestamp, &now, sizeof(uint64_t));
 }
 

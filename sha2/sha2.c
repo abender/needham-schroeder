@@ -33,8 +33,8 @@
 
 #include <string.h>	/* memcpy()/memset() or bcopy()/bzero() */
 
-/* disable assertions for wismotes */
-#ifdef CONTIKI_TARGET_WISMOTE
+/* disable assertions for some motes */
+#if (defined(CONTIKI_TARGET_WISMOTE) || defined(CONTIKI_TARGET_SKY) || defined(CONTIKI_TARGET_Z1))
 #ifndef assert
 #warning "assertions are disabled"
 #  define assert(x)
@@ -94,6 +94,23 @@
  * <machine/endian.h> where the appropriate definitions are actually
  * made).
  */
+ 
+/* taken from tinydtls by Olaf Bergmann: http://tinydtls.sourceforge.net/ */
+#ifndef LITTLE_ENDIAN
+#define LITTLE_ENDIAN 1234
+#endif
+#ifndef BIG_ENDIAN
+#define BIG_ENDIAN 4321
+#endif
+
+#ifndef BYTE_ORDER
+#  ifdef WORDS_BIGENDIAN
+#    define BYTE_ORDER BIG_ENDIAN
+#  else /* WORDS_BIGENDIAN */
+#    define BYTE_ORDER LITTLE_ENDIAN
+#  endif
+#endif
+ 
 #if !defined(BYTE_ORDER) || (BYTE_ORDER != LITTLE_ENDIAN && BYTE_ORDER != BIG_ENDIAN)
 #error Define BYTE_ORDER to be equal to either LITTLE_ENDIAN or BIG_ENDIAN
 #endif

@@ -61,13 +61,13 @@ void ns_simple_log(int level, int app_level, char *msg, ...);
 #define ns_log_error(...) ns_simple_log(3, NS_LOG_LEVEL, __VA_ARGS__)
 #define ns_log_fatal(...) ns_simple_log(4, NS_LOG_LEVEL, __VA_ARGS__)
 
-void ns_dump_bytes_to_hex(char *bytes, size_t length);
+void ns_dump_bytes_to_hex(unsigned char *bytes, size_t length);
 
-void ns_dump_bytes_to_bin(char *bytes, size_t length);
+void ns_dump_bytes_to_bin(unsigned char *bytes, size_t length);
 
-void ns_dump_byte_to_hex(char *b);
+void ns_dump_byte_to_hex(unsigned char *b);
 
-void ns_dump_byte_to_bin(char *b);
+void ns_dump_byte_to_bin(unsigned char *b);
 
 char* ns_stringify(char *b, int len);
 
