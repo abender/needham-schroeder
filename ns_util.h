@@ -69,6 +69,4 @@ void ns_dump_byte_to_hex(unsigned char *b);
 
 void ns_dump_byte_to_bin(unsigned char *b);
 
-char* ns_stringify(char *b, int len);
-
 #endif // _NS_UTILITIES_

@@ -110,6 +110,8 @@ int main(int argc, char **argv) {
   };
   
   fd = ns_bind_socket(client_port, AF_INET);
+  if(fd < 0)
+    exit(-1);
   
   context = ns_initialize_context(&fd, &handler);
   if(!context) {

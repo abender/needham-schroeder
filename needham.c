@@ -45,6 +45,8 @@ void ns_alter_nonce(char *original, char *altered);
 int ns_verify_nonce(char *original_nonce, char *verify_nonce);
 
 #ifndef CONTIKI
+int ns_resolve_sockaddr(char *server, struct sockaddr *dst);
+
 int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved);
 #endif /* CONTIKI */
 
@@ -177,6 +179,64 @@ int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
 }
 
 #ifndef CONTIKI
+/* Taken from libcoap by Olaf Bergmann: http://libcoap.sourceforge.net */
+int ns_resolve_sockaddr(char *server, struct sockaddr *dst) {
+  
+  struct addrinfo *res, *ainfo;
+  struct addrinfo hints;
+  static char addrstr[256];
+  int error, len=-1;
+
+  memset(addrstr, 0, sizeof(addrstr));
+  if (strlen(server))
+    memcpy(addrstr, server, strlen(server));
+  else
+    memcpy(addrstr, "localhost", 9);
+
+  memset ((char *)&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_DGRAM;
+  hints.ai_family = AF_UNSPEC;
+
+  error = getaddrinfo(addrstr, "", &hints, &res);
+
+  if (error != 0) {
+    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
+    return error;
+  }
+
+  for (ainfo = res; ainfo != NULL; ainfo = ainfo->ai_next) {
+    switch (ainfo->ai_family) {
+    case AF_INET6:
+    case AF_INET:
+      len = ainfo->ai_addrlen;
+      memcpy(dst, ainfo->ai_addr, len);
+      goto finish;
+    default:
+      ;
+    }
+  }
+
+ finish:
+  freeaddrinfo(res);
+  return len;
+}
+
+int ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
+  
+  int res;
+  res = ns_resolve_sockaddr(address, &(resolved->addr.sa));
+  
+  if(res < 0) {
+    ns_log_error("Failed to resolve address\n");
+    return -1;
+  }
+  
+  resolved->size = res;
+  resolved->addr.sin.sin_port = htons(port);
+  
+  return res;
+}
+#if 0
 /* Slightly modified version of resolve_address from libtinydtls by Olaf Bergmann
  ( MIT License: http://tinydtls.sourceforge.net/)  */
 int
@@ -208,6 +268,10 @@ ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
 
     switch (ainfo->ai_family) {
     case AF_INET6:
+      inet_pton(AF_INET6, address, &(resolved->addr.sin6.sin6_addr));
+      resolved->addr.sin6.sin6_port = htons(port);
+      resolved->size = ainfo->ai_addrlen;
+      return ainfo->ai_addrlen;
     /* TODO implement */
     case AF_INET:
       memcpy(&resolved->addr, ainfo->ai_addr, ainfo->ai_addrlen);
@@ -221,7 +285,10 @@ ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
 
   freeaddrinfo(res);
   return -1;
+
 }
+#endif
+
 #endif /* CONTIKI */
 
 #ifndef CONTIKI
@@ -231,11 +298,21 @@ ns_resolve_address(char *address, int port, ns_abstract_address_t *resolved) {
 int ns_bind_socket(int port, unsigned char family) {
   
   int s;
+  int on = 1;
+  int off = 0;
   s = socket(family, SOCK_DGRAM, 0);
   
   if(s < 0) {
     ns_log_fatal("Could not create socket: %s", strerror(errno));
-    exit(-1);
+    return -1;
+  }
+  
+  if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0)
+    ns_log_warning("setsockopt SO_REUSEADDR");
+    
+  if(family == AF_INET6) {
+    if(setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)) < 0)
+      ns_log_warning("setsockopt IPV6_V6ONLY\n");
   }
   
   if(family == AF_INET6) {
@@ -246,10 +323,10 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin6_family = AF_INET6;
     listen_addr.sin6_port = htons(port);
     listen_addr.sin6_addr = in6addr_any;
-    // FIXME cleanup
+
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
       ns_log_fatal("Could not bind socket: %s", strerror(errno));
-      exit(-1);
+      return -1;
     }
     
   } else if(family == AF_INET) {
@@ -260,15 +337,15 @@ int ns_bind_socket(int port, unsigned char family) {
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_port = htons(port);
     listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    // FIXME cleanup
+
     if(bind(s, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
       ns_log_fatal("Could not bind socket: %s", strerror(errno));
-      exit(-1);
+      return -1;
     }
     
   } else {
     ns_log_fatal("unkown address family: %s", family);
-    exit(-1);
+    return -1;
   }
   return s;
 }
@@ -462,7 +539,14 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
     memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], timestamp, sizeof(timestamp));
-    
+
+#ifdef NSDEBUG
+    char pkey[NS_RIN_KEY_LENGTH+1] = {0};
+    memcpy(pkey, key_receiver, NS_RIN_KEY_LENGTH);
+    ns_log_debug("Key used to encrypt ticket: %s", pkey);
+    ns_dump_bytes_to_hex((unsigned char*)key_receiver, NS_RIN_KEY_LENGTH);
+#endif
+
     /* Encrypt package for receiver, tmp-key + sender-id + timestamp */
     ns_encrypt_pkcs7((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
         sizeof(r_packet), NS_RIN_KEY_LENGTH);
@@ -557,6 +641,13 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
   char dec_pkt[NS_ENC_COM_REQ_LENGTH];
   char packet_time[NS_TIMESTAMP_LENGTH];
   
+#ifdef NSDEBUG
+  char pkey[NS_RIN_KEY_LENGTH+1] = {0};
+  memcpy(pkey, context->key, NS_RIN_KEY_LENGTH);
+  ns_log_debug("Key used to decrypt: %s", pkey);
+  ns_dump_bytes_to_hex((unsigned char*)context->key, NS_RIN_KEY_LENGTH);
+#endif
+
   ns_decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
       sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
     
@@ -568,7 +659,8 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
   
   /* Validate time. Do nothing if validation fails */
   if(ns_validate_timestamp(packet_time) != 0) {
-    ns_log_warning("received packet with expired timestamp, discarding it.");
+    ns_log_warning("received packet with expired timestamp, discarding it."
+      " (this may also be caused by a wrong key for decryption)");
     return;
   }
   
@@ -889,6 +981,12 @@ void ns_create_timestamp(char* timestamp) {
  */
 int ns_validate_timestamp(char* timestamp) {
 
+#ifdef CONTIKI
+/* FIXME: timestamp validation disabled for contiki until I've found a way to
+   validate timestamps for nodes without proper clock */
+  return 0;
+#endif
+
   /* get host-byte-order timestamp */
   uint64_t t = ntohll(*((uint64_t*) timestamp));
   
@@ -898,8 +996,12 @@ int ns_validate_timestamp(char* timestamp) {
 #else
   now = (uint64_t) clock_seconds();
 #endif /* CONTIKI */
-  
+
   if(now - t > NS_KEY_LIFETIME) {
+#ifdef NSDEBUG
+    ns_log_debug("current time is: %llu, received timestamp: %llu. (now - t = %llu)\n",
+      now, t, (now - t));
+#endif
     return -1;
   } else {
     return 0;

@@ -27,6 +27,7 @@ See `needham.h` for a description of all modifiable values.
 
 ## TODOs
 
+* **The timestamp validation is currently disabled for Contiki Applications until I've found a proper way to handle timestamps on constrained devices**
 * Implement tests!
 * Improve Contiki compatibility
 * Implement other encryption methods
