@@ -53,6 +53,7 @@ typedef unsigned int clock_time_t;
 
 #include "uip.h"
 #include "list.h"
+#include "memb.h"
 
 #endif /* CONTIKI */
 
@@ -117,6 +118,11 @@ typedef unsigned int clock_time_t;
 /* Key lifetime, in seconds. This is used to antagonize replay-attacks and says
    when the Daemon will reject packets with communication requests. */
 #define NS_KEY_LIFETIME (60 * 5)
+
+/* Maximum number of simultaneously peers */
+#ifndef NS_MAX_PEERS
+#define NS_MAX_PEERS 5
+#endif
 
 /* Message codes */
 typedef enum {
@@ -252,7 +258,6 @@ typedef struct ns_context_t {
 #endif /* CONTIKI */
   
   void *app; /* Socket fd for Unix Systems or uip_udp_conn for Contiki */
-  char nonce[NS_NONCE_LENGTH]; // FIXME: nonce not necessary here? nonce is stored per peer
   char identity[NS_IDENTITY_LENGTH];
   char key[NS_KEY_LENGTH];
   ns_role_t role;
@@ -272,7 +277,7 @@ int ns_bind_socket(int port, unsigned char family);
 
 /**
  * Creates a new context, which stores many informations needed by the library.
- * Applications must free this with ns_free_context().
+ * Applications must free this with ns_destroy_context().
  *
  * @param app A pointer to the network interface, e.g. the socket in Unix, or
  *      uip_udp_conn for Contiki
@@ -286,7 +291,7 @@ ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler);
  *
  * @param context
  */
-void ns_free_context(ns_context_t *context);
+void ns_destroy_context(ns_context_t *context);
 
 /**
  * Handles a message and usually is placed within a loop which retrieves messages

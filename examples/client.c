@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
   /* Key process completed, either on success or any error */
   
   print_identities();
-  ns_free_context(context);
+  ns_destroy_context(context);
         
   return 0;
 }

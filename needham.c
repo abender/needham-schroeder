@@ -38,8 +38,16 @@
 #include "rin_wrapper.h"
 #include "sha2/sha2.h"
 
+#ifdef CONTIKI
+/* Storage for peers */
+MEMB(ns_peers_store, ns_peer_t, NS_MAX_PEERS);
+
+/* Storage for context */
+MEMB(ns_context_store, ns_context_t, 1);
+#endif /* CONTIKI */
+
 /* Common functions */
- 
+
 void ns_alter_nonce(char *original, char *altered);
 
 int ns_verify_nonce(char *original_nonce, char *verify_nonce);
@@ -98,6 +106,10 @@ void ns_retransmit(ns_context_t *context);
 
 void ns_reset_buffer(ns_peer_t *peer);
 
+static inline ns_peer_t* ns_alloc_peer();
+
+static inline void ns_free_peer(ns_peer_t *peer);
+
 ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
       ns_abstract_address_t *peer_addr);
   
@@ -121,9 +133,13 @@ int ns_discard_invalid_messages(ns_context_t *context, char *buf, size_t len);
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key);
 
+static inline ns_context_t* ns_alloc_context();
+
+static inline void ns_free_context(ns_context_t *ctx);
+
 ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler);
 
-void ns_free_context(ns_context_t *context);
+void ns_destroy_context(ns_context_t *context);
 
 void ns_free_peers(ns_context_t *context);
 
@@ -452,7 +468,7 @@ void ns_send_buffered(ns_context_t *context, ns_peer_t *peer, uint8_t *data, siz
 
 void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *peer) {
   
-  ns_random_key(context->nonce, NS_NONCE_LENGTH);
+  ns_random_key(server->nonce, NS_NONCE_LENGTH);
   
   /* Message Code + Client identity + Partner identity + Nonce */
   char out_buffer[1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH] = { 0 };
@@ -465,7 +481,7 @@ void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *pe
   memcpy(&out_buffer[pos], peer->identity,
         strnlen(peer->identity, NS_IDENTITY_LENGTH));
   pos += NS_IDENTITY_LENGTH;
-  memcpy(&out_buffer[pos], context->nonce, NS_NONCE_LENGTH);
+  memcpy(&out_buffer[pos], server->nonce, NS_NONCE_LENGTH);
   
   ns_send_buffered(context, server, (uint8_t*) out_buffer, sizeof(out_buffer));
 
@@ -611,7 +627,7 @@ void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
     return;
   }
 
-  if(ns_verify_nonce(context->nonce, altered_nonce) == 0) {
+  if(ns_verify_nonce(server->nonce, altered_nonce) == 0) {
     memcpy(partner->key, com_key, NS_KEY_LENGTH);
     context->state = NS_STATE_KEY_RESPONSE;
     ns_log_debug("received new key from server.");
@@ -814,6 +830,24 @@ void ns_reset_buffer(ns_peer_t *peer) {
   peer->retransmits = 0;
 }
 
+static inline ns_peer_t*
+ns_alloc_peer() {
+#ifdef CONTIKI
+  return (ns_peer_t*) memb_alloc(&ns_peers_store);
+#else
+  return (ns_peer_t*) malloc(sizeof(ns_peer_t));
+#endif /* CONTIKI */
+}
+#1
+static inline void
+ns_free_peer(ns_peer_t *peer) {
+#ifdef CONTIKI
+  memb_free(&ns_peers_store, peer);
+#else
+  free(peer);
+#endif /* CONTIKI */
+}
+
 /**
  * Finds or creates a daemon peer for the daemons context.
  *
@@ -831,11 +865,10 @@ ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
   }
   
   /* peer doesn't exist, create and store a new one */
-  peer = (ns_peer_t*) malloc(sizeof(ns_peer_t));
+  peer = ns_alloc_peer();
   
-  /* propably enough memory available to malloc */
   if(!peer) {
-    ns_log_warning("not enough memory to allocate memory for a new peer.");
+    ns_log_warning("no memory: alloc ns_peer_t");
     return peer;
   }
   
@@ -942,7 +975,7 @@ void ns_cleanup(ns_context_t *context) {
   for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
     if(peer->expires != 0 && peer->expires < clock_seconds()) {
       list_remove(context->peers, peer);
-      free(peer);
+      ns_free_peer(peer);
     }
   }
 #else /* CONTIKI */
@@ -950,7 +983,7 @@ void ns_cleanup(ns_context_t *context) {
   HASH_ITER(hh, context->peers, peer, tmp) {
     if(peer->expires != 0 && peer->expires < time(NULL)) {
       HASH_DEL(context->peers, peer);
-      free(peer);
+      ns_free_peer(peer);
     }
   }
 #endif /* CONTIKI */
@@ -1057,10 +1090,34 @@ void ns_set_role(ns_context_t *context, ns_role_t role) {
   context->role = role;
 }
 
+static inline ns_context_t*
+ns_alloc_context() {
+#ifdef CONTIKI
+  return (ns_context_t*) memb_alloc(&ns_context_store);
+#else
+  return (ns_context_t*) malloc(sizeof(ns_context_t));
+#endif /* CONTIKI */
+}
+
+static inline void
+ns_free_context(ns_context_t *ctx) {
+#ifdef CONTIKI
+  memb_free(&ns_context_store, ctx);
+#else
+  free(ctx);
+#endif /* CONTIKI */
+}
+
 ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler) {
   
+#ifdef CONTIKI
+  /* Initialize memory blocks */
+  memb_init(&ns_context_store);
+  memb_init(&ns_peers_store);
+#endif
+  
   ns_context_t *context = NULL;
-  context = malloc(sizeof(ns_context_t));
+  context = ns_alloc_context();
   
   if(context) {
     memset(context, 0, sizeof(ns_context_t));
@@ -1075,9 +1132,9 @@ ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler) {
   return context;
 }
 
-void ns_free_context(ns_context_t *context) {
+void ns_destroy_context(ns_context_t *context) {
   ns_free_peers(context);
-  free(context);
+  ns_free_context(context);
 }
 
 void ns_free_peers(ns_context_t *context) {
@@ -1088,7 +1145,7 @@ void ns_free_peers(ns_context_t *context) {
     list_remove(context->peers, peer);
     if(peer->msg_buf)
       free(peer->msg_buf);
-    free(peer);
+    ns_free_peer(peer);
   }
 #else /* CONTIKI */
   ns_peer_t *tmp;
@@ -1096,7 +1153,7 @@ void ns_free_peers(ns_context_t *context) {
     HASH_DEL(context->peers, peer);
     if(peer->msg_buf)
       free(peer->msg_buf);
-    free(peer);
+    ns_free_peer(peer);
   }
 #endif /* CONTIKI */
 

@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     ns_handle_message(context, &tmp_addr, in_buffer, read_bytes);
   }
   
-  ns_free_context(context);
+  ns_destroy_context(context);
   
   return 0;
 }
