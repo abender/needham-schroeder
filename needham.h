@@ -1,7 +1,7 @@
 /**
  * simple extended Needham-Schroeder implementation
  *
- * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
+ * Copyright (c) 2013-2014 Andreas Bender <bender86@arcor.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -29,7 +29,8 @@
 
 #ifndef CONTIKI
 
-#include <sys/time.h>
+#include <sys/time.h> /* OS X select() */
+#include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -64,24 +65,34 @@ typedef unsigned int clock_time_t;
  * 2: warning
  * 3: error
  * 4: fatal
+ *
+ * Debug messages can be removed by removing -DNSDEBUG from the CFLAGS.
+ *
  */
 
-/* CAUTION: The library currently only supports multiples of 16 for NS_KEY_LENGTH,
- * NS_IDENTITY_LENGTH and NS_NONCE_LENGTH.
+/* CAUTION: The library currently only supports multiples of 16 for,
+ * NS_IDENTITY_LEN and NS_NONCE_LEN.
  * 
- * NS_RIN_KEY_LENGTH MUST be 16 for the currently used rijndael implementation.
+ * NS_RIN_KEY_LEN MUST be 16 for CCM, which uses AES-128.
  *
  * All values in Bytes
  */
 #define NS_BLOCKSIZE 16       // Blocksize of the encryption algorithm used for NS
-#define NS_KEY_LENGTH 16      // Length of the tmp-key used for DTLS
-#define NS_RIN_KEY_LENGTH 16  // Length of the AES Key
-#define NS_IDENTITY_LENGTH 16 // Length of global identifiers for communication partners
-#define NS_NONCE_LENGTH 16    // Nonce length used in Needham-Schroeder
+#define NS_KEY_LEN 16      // Length of the tmp-key used for DTLS
+#define NS_RIN_KEY_LEN 16  // Length of the AES Key
+#define NS_IDENTITY_LEN 16 // Length of global identifiers for communication partners
+#define NS_NONCE_LEN 16    // Nonce length used in Needham-Schroeder
+
+/*
+ * Values for CCM encryption (see RFC 3610)
+ */
+#define NS_CCM_L 2                // 2 Bytes for length field
+#define NS_CCM_N (15 - NS_CCM_L)  // 13 Bytes IV
+#define NS_CCM_M 8                // 8-Byte MAC
 
 /* Length of the timestamp used to validate messages, must be 8 because
    ns_create_timestamp creates an 8 bytes long timestamp. */
-#define NS_TIMESTAMP_LENGTH 8
+#define NS_TIMESTAMP_LEN 8
 
 /* Calculate the length that is needed for a block of \p len Bytes to match
    multiples of NS_BLOCKSIZE */
@@ -89,26 +100,37 @@ typedef unsigned int clock_time_t;
   (((len) % NS_BLOCKSIZE == 0) ? (len) : ((len) - ((len) % NS_BLOCKSIZE) + NS_BLOCKSIZE))
 
 /* Message sizes */
-   
-#define NS_ENC_COM_REQ_LENGTH \
-  (ns_padded_length(NS_KEY_LENGTH+NS_IDENTITY_LENGTH+NS_TIMESTAMP_LENGTH))
 
-#define NS_ENC_KEY_RESPONSE_LENGTH \
-  (ns_padded_length(NS_NONCE_LENGTH + NS_IDENTITY_LENGTH + NS_KEY_LENGTH + \
-   NS_ENC_COM_REQ_LENGTH))
+#define NS_KEY_REQUEST_LEN (1 + 2 * NS_IDENTITY_LEN + NS_NONCE_LEN)
 
-#define NS_ENC_COM_CHALLENGE_LENGTH \
-  (ns_padded_length(NS_NONCE_LENGTH))
+#define NS_KEY_RESPONSE_LEN \
+  (1 + NS_CCM_N + NS_NONCE_LEN + NS_IDENTITY_LEN + NS_KEY_LEN + NS_TICKET_LEN + NS_CCM_M)
 
-#define NS_ENC_COM_RESPONSE_LENGTH \
-  (ns_padded_length(NS_NONCE_LENGTH))
+/* This is the length of the ticket, created by the AS and forwared by the initiator
+    to the key exchange partner */
+#define NS_TICKET_LEN \
+  (NS_CCM_N + NS_KEY_LEN + NS_IDENTITY_LEN + NS_TIMESTAMP_LEN + NS_CCM_M)
 
-#define NS_KEY_REQUEST_LENGTH 1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH
+#define NS_COM_REQ_LEN (1 + NS_TICKET_LEN)
+
+#define NS_ENC_COM_CHALLENGE_LEN \
+  (ns_padded_length(NS_NONCE_LEN))
+
+#define NS_ENC_COM_RESPONSE_LEN \
+  (ns_padded_length(NS_NONCE_LEN))
+
+#ifndef MAX
+#define MAX(A,B) ((A) <= (B) ? (B) : (A))
+#endif
+
+/* The size of the largest outgoing message that needs to be buffered */
+#define NS_MAX_OUT_SIZE (MAX(NS_KEY_REQUEST_LEN, (MAX(NS_COM_REQ_LEN, \
+  NS_ENC_COM_RESPONSE_LEN))))
 
 /* Buffer sizes for each application type. */
-#define NS_DAEMON_BUFFER_SIZE (1 + NS_ENC_COM_REQ_LENGTH)
-#define NS_SERVER_BUFFER_SIZE NS_KEY_REQUEST_LENGTH
-#define NS_CLIENT_BUFFER_SIZE (1 + NS_ENC_KEY_RESPONSE_LENGTH)
+#define NS_DAEMON_BUFFER_SIZE NS_COM_REQ_LEN
+#define NS_SERVER_BUFFER_SIZE NS_KEY_REQUEST_LEN
+#define NS_CLIENT_BUFFER_SIZE NS_KEY_RESPONSE_LEN
 
 /* Retransmissions */
 #define NS_RETRANSMIT_TIMEOUT 5 // Timeout length for retransmissions in seconds
@@ -228,6 +250,13 @@ typedef struct {
   
 } ns_handler_t;
 
+/* Represents one message in the outgoing messages buffer */
+typedef struct {
+  uint8_t data[NS_MAX_OUT_SIZE];
+  size_t len;
+  int retransmits;
+} ns_out_item_t;
+
 typedef struct {
 #ifndef CONTIKI
   UT_hash_handle hh;
@@ -237,14 +266,14 @@ typedef struct {
   unsigned long expires;
 #endif /* CONTIKI */
   ns_abstract_address_t addr;
-  char nonce[NS_NONCE_LENGTH];
-  char identity[NS_IDENTITY_LENGTH];
-  char key[NS_KEY_LENGTH];
+  char nonce[NS_NONCE_LEN];
+  char identity[NS_IDENTITY_LEN];
+  char key[NS_KEY_LEN];
   int state;
-  uint8_t *msg_buf; /* buffer for messages, used for retransmissions */
-  size_t msg_buf_len; /* length of the retransmission buffer */
-  int retransmits; /* number of performed retransmissions */
   
+  /* Buffer for outgoing messages, used for retransmissions */
+  ns_out_item_t *out_buf;
+
 } ns_peer_t;
 
 typedef struct ns_context_t {
@@ -258,8 +287,8 @@ typedef struct ns_context_t {
 #endif /* CONTIKI */
   
   void *app; /* Socket fd for Unix Systems or uip_udp_conn for Contiki */
-  char identity[NS_IDENTITY_LENGTH];
-  char key[NS_KEY_LENGTH];
+  char identity[NS_IDENTITY_LEN];
+  char key[NS_KEY_LEN];
   ns_role_t role;
   int state;
   
@@ -310,8 +339,8 @@ void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
  *
  * @param context
  * @param identity The identities name, its length must be smaller or equal to
- *        NS_IDENTITY_LENGTH.
- * @param key The identities key, must be smaller or equal to NS_RIN_KEY_LENGTH.
+ *        NS_IDENTITY_LEN.
+ * @param key The identities key, must be smaller or equal to NS_RIN_KEY_LEN.
  */
 void ns_set_credentials(ns_context_t *context, char *identity, char *key);
 

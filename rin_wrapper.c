@@ -1,7 +1,7 @@
 /**
  * simple extended Needham-Schroeder implementation
  *
- * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
+ * Copyright (c) 2013-2014 Andreas Bender <bender86@arcor.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

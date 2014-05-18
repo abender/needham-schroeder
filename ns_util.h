@@ -1,7 +1,7 @@
 /**
  * simple extended Needham-Schroeder implementation
  *
- * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
+ * Copyright (c) 2013-2014 Andreas Bender <bender86@arcor.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -41,17 +41,25 @@
 void ns_random_key(char *dst, size_t length);
 
 /*
+ * Creates a nonce of \p Bytes usable for CCM, and stores the nonce in \p dst .
+ */
+void ns_random_nonce(char *dst, size_t length);
+
+/*
  * Creates a random identity of \p length Bytes and stores it in \p dst .
  * Uses a different set of characters to create identities.
  */
 void ns_random_identity(char *dst, size_t length);
 
 /* ------------------------------- Logging --------------------------------- */
-
+#ifndef NS_LOG_LEVEL
 #define NS_LOG_LEVEL 0
+#endif
 
 /*
  * Prints \p msg to stdout if \p level is >= "app_level"
+ *
+ * ns_simple_log won't do anything unless NS_DEBUG is defined.
  */
 void ns_simple_log(int level, int app_level, char *msg, ...);
 

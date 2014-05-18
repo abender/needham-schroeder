@@ -1,7 +1,7 @@
 /**
  * simple extended Needham-Schroeder implementation
  *
- * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
+ * Copyright (c) 2013-2014 Andreas Bender <bender86@arcor.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -106,9 +106,20 @@ void ns_random_key(char *dst, size_t length) {
 
 }
 
+/*
+ * TODO: implement
+ */
+void ns_random_nonce(char *dst, size_t length) {
+	
+	return ns_random_key(dst, length);
+	
+}
+
 /* ------------------------------- Logging --------------------------------- */
 
 void ns_simple_log(int level, int app_level, char *msg, ...) {
+
+#ifdef NS_DEBUG
 
 #ifndef CONTIKI
   if(app_level <= level) {
@@ -147,6 +158,9 @@ void ns_simple_log(int level, int app_level, char *msg, ...) {
   }
 
 #endif /* CONTIKI */
+
+#endif /* NS_DEBUG */
+
 }
 
 void ns_dump_bytes_to_hex(unsigned char *bytes, size_t length) {

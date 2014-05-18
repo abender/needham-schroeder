@@ -8,8 +8,8 @@ int run = 1;
 
 typedef struct {
   UT_hash_handle hh;
-  char name[NS_IDENTITY_LENGTH];
-  char key[NS_KEY_LENGTH];
+  char name[NS_IDENTITY_LEN];
+  char key[NS_KEY_LEN];
 } identity_t;
 
 identity_t *identities = NULL;
@@ -19,8 +19,8 @@ int store_key(char *identity_name, char *key) {
   id = malloc(sizeof(identity_t));
   memset(id, 0, sizeof(identity_t));
   
-  memcpy(id->name, identity_name, NS_IDENTITY_LENGTH);
-  memcpy(id->key, key, NS_KEY_LENGTH);
+  memcpy(id->name, identity_name, NS_IDENTITY_LEN);
+  memcpy(id->key, key, NS_KEY_LEN);
   
   HASH_ADD_STR(identities, name, id);
   return 0;
@@ -32,7 +32,7 @@ int get_key(char *identity_name, char *key) {
   HASH_FIND_STR(identities, identity_name, id);
 
   if(id) {
-    memcpy(key, id->key, NS_KEY_LENGTH);
+    memcpy(key, id->key, NS_KEY_LEN);
     return 0;
   } else {
     return -1;
@@ -61,10 +61,10 @@ int send_to_peer(struct ns_context_t *context, ns_abstract_address_t *addr,
 void print_identities() {
   identity_t *id = NULL;
   int i = 0;
-  char tmp_key[NS_KEY_LENGTH+1] = { 0 };
+  char tmp_key[NS_KEY_LEN + 1] = { 0 };
   if(identities) {
     for(id = identities; id != NULL; id = id->hh.next) {
-      memcpy(tmp_key, id->key, NS_KEY_LENGTH);
+      memcpy(tmp_key, id->key, NS_KEY_LEN);
       printf("%d - name : %s, key : %s\n", i, id->name, tmp_key);
       i++;
     }
@@ -89,8 +89,8 @@ int main(int argc, char **argv) {
   struct timeval timeout;
   int sres = 0;
   
-  char *server_address = "127.0.0.1";
-  char *partner_address = "127.0.0.1";
+  char *server_address = "::1";
+  char *partner_address = "::1";
   
   int server_port = 50000;
   int partner_port = 50010;
@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
     .event = event
   };
   
-  fd = ns_bind_socket(client_port, AF_INET);
+  fd = ns_bind_socket(client_port, AF_INET6);
   if(fd < 0)
     exit(-1);
   

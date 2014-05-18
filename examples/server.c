@@ -6,7 +6,7 @@
 /**
  * Callback function to get a key for \p identity_name. This function could
  * get identity-key-pairs from a database for example. Keys must have the length
- * of NS_RIN_KEY_LENGTH bytes.
+ * of NS_RIN_KEY_LEN bytes.
  *
  * In this example the server knows the identities "example_client" and
  * "example_daemon" and their corresponding keys. A return value of -1 indicates
@@ -16,27 +16,27 @@ int get_key(char *identity_name, char *key) {
   
   if(strcmp(identity_name, "example_client") == 0) {
     char *client_key = "0123456789012345";
-    memcpy(key, client_key, NS_RIN_KEY_LENGTH);
+    memcpy(key, client_key, NS_RIN_KEY_LEN);
     return 0;
     
   } else if(strcmp(identity_name, "example_daemon") == 0) {
     char *daemon_key = "1111111111222222";
-    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    memcpy(key, daemon_key, NS_RIN_KEY_LEN);
     return 0;
     
   } else if(strcmp(identity_name, "smartobject-1") == 0) {
     char *daemon_key = "1111111111222222";
-    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    memcpy(key, daemon_key, NS_RIN_KEY_LEN);
     return 0;
     
   } else if(strcmp(identity_name, "bender") == 0) {
     char *daemon_key = "1234567890123456";
-    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    memcpy(key, daemon_key, NS_RIN_KEY_LEN);
     return 0;
     
   } else if(strcmp(identity_name, "rd_12345") == 0) {
     char *daemon_key = "1111111111222222";
-    memcpy(key, daemon_key, NS_RIN_KEY_LENGTH);
+    memcpy(key, daemon_key, NS_RIN_KEY_LEN);
     return 0;
     
   } else {

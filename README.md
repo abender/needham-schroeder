@@ -1,6 +1,6 @@
 # seNS - a simple extended Needham-Schroeder C-library
 
-seNS is a small and simple C-library to perform an extended (symmetric) Needham-Schroeder(NS)-protocol. Extended means in this case, that the basic NS-Protocol has been extended to make use of timestamps, which are used to antagonize replay attacks (see a description of the attack in "[Security Engineering](http://www.cl.cam.ac.uk/~rja14/book.html)" Chapter 3.7.2 by Ross Anderson). It provides basic functions to:
+seNS is a small and simple C-library to perform an extended (symmetric) Needham-Schroeder(NS)-protocol. Extended means, that the basic NS-Protocol has been extended to make use of timestamps, which are used to solve several vulnerabilities by the original protocol. (See "[Security Engineering](http://www.cl.cam.ac.uk/~rja14/book.html)" Chapter 3.7.2 by Ross Anderson). It provides basic functions to:
 
 * Run a NS-server, creating and distributing keys for securing some other protocol (for example DTLS in pre-shared-key mode)
 * Run a NS-daemon, waiting for clients to initialize the communication
@@ -19,7 +19,7 @@ The library has been tested with Debian/Linux Systems and OS X. Basic compatibil
 
 ## Configuration
 
-It is intended, that the user may choose lengths for all attributes of the NS-protocol (e.g. The length of identities, nonces and keys). While those for identities and nonces can be freely chosen, the lengths of the keys must be 16 Bytes for use with the Rijndael-implementation. If you want to use other key lengths make sure to overwrite `ns_encrypt_pkcs7`, `ns_encrypt` and `ns_decrypt` and set the values for `NS_BLOCKSIZE`, `NS_KEY_LENGTH` and `NS_RIN_KEY_LENGTH`.
+It is intended, that the user may choose lengths for all attributes of the NS-protocol (e.g. The length of identities, nonces and keys). While those for identities and nonces can be freely chosen, the lengths of the keys must be 16 Bytes, so they can be used for AES-128 and [CCM](https://tools.ietf.org/html/rfc3610)
 
 The NS-client performs retransmissions to deal with lossy networks. To adjust its parameters change `NS_RETRANSMIT_TIMEOUT` and `NS_RETRANSMIT_MAX` accordingly.
 
@@ -28,16 +28,15 @@ See `needham.h` for a description of all modifiable values.
 ## TODOs
 
 * **The timestamp validation is currently disabled for Contiki Applications until I've found a proper way to handle timestamps on constrained devices**
-* Implement tests!
+* Create callback function for timestamp validation
+* Move some defines to a config.h
+* Implement tests
 * Improve Contiki compatibility
-* Implement other encryption methods
-* Transmission error detection
-* Check cleanups
-* Vary the timeout of retransmissions
+* Vary the timeout of retransmissions (e.g. lineary/exponentially increasing intervals)
 
 ## Authors and Contact
 
-seNS was written by Andreas Bender <bender@tzi.de>
+seNS was written by Andreas Bender <bender86@arcor.de>
 
 If you have any questions, remarks, suggestion, improvements,
 etc. feel free to drop a line at the address given above.
@@ -46,7 +45,7 @@ etc. feel free to drop a line at the address given above.
 
 This software is published under [MIT License](http://opensource.org/licenses/mit-license.php)
 
-Some parts of the code are based on code from [tinydtls](http://tinydtls.sourceforge.net/) by Olaf Bergmann, published under [MIT License](http://opensource.org/licenses/mit-license.php)
+Some parts of the code are taken (e.g. the CCM implementation) or based on code from [tinydtls](http://tinydtls.sourceforge.net/) by Olaf Bergmann, published under [MIT License](http://opensource.org/licenses/mit-license.php)
 
 Used libraries:
 

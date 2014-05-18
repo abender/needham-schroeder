@@ -1,7 +1,7 @@
 /**
  * simple extended Needham-Schroeder implementation
  *
- * Copyright (c) 2013 Andreas Bender <bender@tzi.de>
+ * Copyright (c) 2013-2014 Andreas Bender <bender86@arcor.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -38,12 +38,21 @@
 #include "rin_wrapper.h"
 #include "sha2/sha2.h"
 
+#include "ccm.h"
+
 #ifdef CONTIKI
 /* Storage for peers */
 MEMB(ns_peers_store, ns_peer_t, NS_MAX_PEERS);
 
 /* Storage for context */
 MEMB(ns_context_store, ns_context_t, 1);
+
+/* Storage for outgoing messages, used for retransmissions. Needs 1 slot per peer */
+MEMB(ns_out_buf_store, ns_out_item_t, NS_MAX_PEERS);
+
+/* Storage for incoming messages, used for key responses that don't come in order.
+   Needs 1 slot per peer */
+MEMB(ns_in_buf_store, ns_in_item_t, NS_MAX_PEERS);
 #endif /* CONTIKI */
 
 /* Common functions */
@@ -62,7 +71,7 @@ char* ns_state_to_str(int state);
 
 /* Protocol functions */
 
-#ifndef CONTIKI
+#ifndef CONTIKI // FIXME: check if function is still used
 void ns_get_key(ns_context_t *context, char *server_address, int server_port,
       char *partner_address, int partner_port, char *partner_identity);
 #endif /* CONTIKI */
@@ -105,6 +114,10 @@ void ns_handle_err_unknown_id(ns_context_t *context);
 void ns_retransmit(ns_context_t *context);
 
 void ns_reset_buffer(ns_peer_t *peer);
+
+static inline ns_out_item_t* ns_alloc_out_item();
+
+static inline void ns_free_out_item(ns_out_item_t *item);
 
 static inline ns_peer_t* ns_alloc_peer();
 
@@ -151,43 +164,43 @@ uint64_t ntohll(uint64_t val);
 
 void ns_alter_nonce(char *original, char *altered) {
   
-#ifdef NSDEBUG
-  if(NS_NONCE_LENGTH > SHA256_BLOCK_LENGTH) {
+#ifdef NS_DEBUG
+  if(NS_NONCE_LEN > SHA256_BLOCK_LENGTH) {
     ns_log_warning("the nonce length (%d) is bigger than the provided hash buffer (%d)",
-          NS_NONCE_LENGTH, SHA256_BLOCK_LENGTH);
+          NS_NONCE_LEN, SHA256_BLOCK_LENGTH);
   }
-  if(NS_NONCE_LENGTH > SHA256_DIGEST_LENGTH) {
+  if(NS_NONCE_LEN > SHA256_DIGEST_LENGTH) {
     ns_log_warning("the nonce length (%d) is bigger than the sha256 digest (%d)",
-          NS_NONCE_LENGTH, SHA256_DIGEST_LENGTH);
+          NS_NONCE_LEN, SHA256_DIGEST_LENGTH);
   }
 #endif
   
   char buf[SHA256_DIGEST_LENGTH] = { 0 };
 
-  memcpy(buf, original, NS_NONCE_LENGTH);
+  memcpy(buf, original, NS_NONCE_LEN);
   
 	SHA256_CTX	ctx256;
 	SHA256_Init(&ctx256);
-	SHA256_Update(&ctx256, (unsigned char*) buf, NS_NONCE_LENGTH);
+	SHA256_Update(&ctx256, (unsigned char*) buf, NS_NONCE_LEN);
   SHA256_Final((uint8_t*) buf, &ctx256);
 	
-  memcpy(altered, buf, NS_NONCE_LENGTH);
+  memcpy(altered, buf, NS_NONCE_LEN);
 }
 
 int ns_verify_nonce(char *original_nonce, char *verify_nonce) {
   
-  char altered_nonce[NS_NONCE_LENGTH];
+  char altered_nonce[NS_NONCE_LEN];
   ns_alter_nonce(original_nonce, altered_nonce);
   
-  if(memcmp(altered_nonce, verify_nonce, NS_NONCE_LENGTH) == 0) {
+  if(memcmp(altered_nonce, verify_nonce, NS_NONCE_LEN) == 0) {
     return 0;
   } else {
-#ifdef NSDEBUG
+#ifdef NS_DEBUG
     ns_log_debug("--------------------");
     ns_log_debug("nonce verification failed, my altered nonce is:");
-    ns_dump_bytes_to_hex((unsigned char*) altered_nonce, NS_NONCE_LENGTH);
+    ns_dump_bytes_to_hex((unsigned char*) altered_nonce, NS_NONCE_LEN);
     ns_log_debug("but the received nonce is:");
-    ns_dump_bytes_to_hex((unsigned char*) verify_nonce, NS_NONCE_LENGTH);
+    ns_dump_bytes_to_hex((unsigned char*) verify_nonce, NS_NONCE_LEN);
     ns_log_debug("--------------------");
 #endif
     return -1;
@@ -404,7 +417,7 @@ void ns_get_key(ns_context_t *context, char *server_address, int server_port,
   server = ns_find_or_create_peer(context, &server_addr);
   partner = ns_find_or_create_peer(context, &partner_addr);
   
-  memcpy(partner->identity, partner_identity, NS_IDENTITY_LENGTH);
+  memcpy(partner->identity, partner_identity, NS_IDENTITY_LEN);
   
   ns_send_key_request(context, server, partner);
 }
@@ -453,41 +466,47 @@ void ns_handle_message(ns_context_t *context, ns_abstract_address_t *addr,
 
 void ns_send_buffered(ns_context_t *context, ns_peer_t *peer, uint8_t *data, size_t len) {
 
-  /* store this packet for possible retransmissions */
-  peer->msg_buf = (uint8_t*) malloc(len);
-  if(!peer->msg_buf) {
-    ns_log_warning("no memory to buffer this message, if it is lost a retransmit timeout will occur.");
-    peer->retransmits = NS_RETRANSMIT_MAX+1;
-  } else {
-    memcpy(peer->msg_buf, data, len);
-    peer->msg_buf_len = len;
-    peer->retransmits = 0;    
+  /* clear previously buffered messages */
+  if(peer->out_buf)
+    ns_free_out_item(peer->out_buf);
+
+  peer->out_buf = ns_alloc_out_item();
+  if(!peer->out_buf) {
+	ns_log_warning("no memory to buffer message!");
+	return;
   }
+
+  /* store this packet for possible retransmissions */
+  peer->out_buf->len = len;
+  peer->out_buf->retransmits = 0;
+  memcpy(peer->out_buf->data, data, len);
+
   context->handler->write(context, &peer->addr, data, len);
 }
 
 void ns_send_key_request(ns_context_t *context, ns_peer_t *server, ns_peer_t *peer) {
   
-  ns_random_key(server->nonce, NS_NONCE_LENGTH);
+  ns_random_nonce(server->nonce, NS_NONCE_LEN);
   
   /* Message Code + Client identity + Partner identity + Nonce */
-  char out_buffer[1+2*NS_IDENTITY_LENGTH+NS_NONCE_LENGTH] = { 0 };
+  char out_buffer[NS_KEY_REQUEST_LEN] = { 0 };
   
   out_buffer[0] = NS_STATE_KEY_REQUEST;
   
   int pos = 1;
-  memcpy(&out_buffer[pos], context->identity, strnlen(context->identity, NS_IDENTITY_LENGTH));
-  pos += NS_IDENTITY_LENGTH;
+  memcpy(&out_buffer[pos], context->identity, strnlen(context->identity, NS_IDENTITY_LEN));
+  pos += NS_IDENTITY_LEN;
   memcpy(&out_buffer[pos], peer->identity,
-        strnlen(peer->identity, NS_IDENTITY_LENGTH));
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(&out_buffer[pos], server->nonce, NS_NONCE_LENGTH);
+        strnlen(peer->identity, NS_IDENTITY_LEN));
+  pos += NS_IDENTITY_LEN;
+  memcpy(&out_buffer[pos], server->nonce, NS_NONCE_LEN);
   
   ns_send_buffered(context, server, (uint8_t*) out_buffer, sizeof(out_buffer));
 
   context->state = NS_STATE_KEY_REQUEST;
+
   ns_log_info("sent key request to server.");
-  
+
 }
 
 /*
@@ -499,11 +518,11 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
   
   int get_sender, get_receiver;
   
-  char id_sender[NS_IDENTITY_LENGTH+1] = { 0 };
-  char id_receiver[NS_IDENTITY_LENGTH+1] = { 0 };
-  char key_sender[NS_RIN_KEY_LENGTH+1] = { 0 };
-  char key_receiver[NS_RIN_KEY_LENGTH+1] = { 0 };
-  char nonce[NS_NONCE_LENGTH+1] = { 0 };
+  char id_sender[NS_IDENTITY_LEN+1] = { 0 };
+  char id_receiver[NS_IDENTITY_LEN+1] = { 0 };
+  char key_sender[NS_RIN_KEY_LEN+1] = { 0 };
+  char key_receiver[NS_RIN_KEY_LEN+1] = { 0 };
+  char nonce[NS_NONCE_LEN+1] = { 0 };
   
   memset(id_sender, 0, sizeof(id_sender));
   memset(id_receiver, 0, sizeof(id_receiver));
@@ -511,11 +530,11 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
   
   /* Get values from incoming packet (sender, receiver, nonce) */
   int pos = 1;
-  memcpy(&id_sender, &in_buffer[1], NS_IDENTITY_LENGTH);
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(&id_receiver, &in_buffer[pos], NS_IDENTITY_LENGTH);
-  pos += NS_IDENTITY_LENGTH;
-  memcpy(&nonce, &in_buffer[pos], NS_NONCE_LENGTH);
+  memcpy(&id_sender, &in_buffer[1], NS_IDENTITY_LEN);
+  pos += NS_IDENTITY_LEN;
+  memcpy(&id_receiver, &in_buffer[pos], NS_IDENTITY_LEN);
+  pos += NS_IDENTITY_LEN;
+  memcpy(&nonce, &in_buffer[pos], NS_NONCE_LEN);
   
   ns_log_info("Received STATE_KEY_REQUEST (Sender-ID: %s, Receiver-ID: %s).",
       id_sender, id_receiver);
@@ -531,119 +550,145 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     
     context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
   
-  /* Identities found, send  {I_a, B, S_k, {S_k, A, T} K_b} K_a */
+  /* Identities found, construct and send the response containing the session ticket */
   } else {
-    char out_buffer[1 + NS_ENC_KEY_RESPONSE_LENGTH];
-    /* Key for sender-receiver communication */
-    char tmp_key[NS_KEY_LENGTH+1] = { 0 };
-    /* The packet for the daemon, without message code
-       (tmp_key, identity-sender, timestamp) */
-    char r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH + NS_TIMESTAMP_LENGTH] = { 0 };
-    char enc_r_packet[NS_ENC_COM_REQ_LENGTH];
-    /* Packet for the sender (excluding the state), unencrypted */
-    char s_packet[NS_NONCE_LENGTH + NS_IDENTITY_LENGTH + NS_KEY_LENGTH +
-                  NS_ENC_COM_REQ_LENGTH];
-    
-    ns_random_key(tmp_key, NS_KEY_LENGTH);
-    
-    /* Build packet for the daemon */
+	
+	  /* create session key */
+    char session_key[NS_KEY_LEN];
+    ns_random_key(session_key, NS_KEY_LEN);
 
-    /* create the timestamp in network-byte-order */
-    char timestamp[NS_TIMESTAMP_LENGTH];
-    ns_create_timestamp(timestamp);
+    /* Build and encrypt the ticket */
+    char ticket_buf[NS_TICKET_LEN] = { 0 };
+    char ticket_nonce[DTLS_CCM_BLOCKSIZE] = { 0 }; 
+    ns_random_nonce(ticket_nonce, NS_CCM_N);
 
-    memcpy(r_packet, tmp_key, NS_KEY_LENGTH);
-    memcpy(&r_packet[NS_KEY_LENGTH], id_sender, NS_IDENTITY_LENGTH);
-    memcpy(&r_packet[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], timestamp, sizeof(timestamp));
+      /* Build ticket for encryption: ( CCM Nonce, Key, ID, T ) */
+    memcpy(ticket_buf, ticket_nonce, NS_CCM_N);
+    pos = NS_CCM_N;
+    memcpy(&ticket_buf[pos], session_key, NS_KEY_LEN);
+    pos += NS_KEY_LEN;
+    memcpy(&ticket_buf[pos], id_sender, NS_IDENTITY_LEN);
+    pos += NS_IDENTITY_LEN;
+    ns_create_timestamp(&ticket_buf[pos]);
 
-#ifdef NSDEBUG
-    char pkey[NS_RIN_KEY_LENGTH+1] = {0};
-    memcpy(pkey, key_receiver, NS_RIN_KEY_LENGTH);
-    ns_log_debug("Key used to encrypt ticket: %s", pkey);
-    ns_dump_bytes_to_hex((unsigned char*)key_receiver, NS_RIN_KEY_LENGTH);
-#endif
+    /* Prepare encryption. The ticket will be encrypted using the receivers key */
+    rijndael_ctx ctx;
+    if(rijndael_set_key_enc_only(&ctx, (u_char*) key_receiver, 8 * NS_RIN_KEY_LEN) < 0) {
+    	ns_log_warning("unable to set key for Rijndael context (ticket encryption)");
+    	return;
+    }
 
-    /* Encrypt package for receiver, tmp-key + sender-id + timestamp */
-    ns_encrypt_pkcs7((u_char*) key_receiver, (u_char*) r_packet, (u_char*) enc_r_packet,
-        sizeof(r_packet), NS_RIN_KEY_LENGTH);
-        
-    char altered_nonce[NS_NONCE_LENGTH] = { 0 };
-    ns_alter_nonce(nonce, altered_nonce);
-    
-    /* Build packet for client */
-    int pos = 0;
-    memcpy(s_packet, altered_nonce, NS_NONCE_LENGTH);
-    pos += NS_NONCE_LENGTH;
-    memcpy(&s_packet[pos], id_receiver, NS_IDENTITY_LENGTH);
-    pos += NS_IDENTITY_LENGTH;
-    memcpy(&s_packet[pos], tmp_key, NS_KEY_LENGTH);
-    pos += NS_KEY_LENGTH;
-    memcpy(&s_packet[pos], enc_r_packet, sizeof(enc_r_packet));
-    
-    out_buffer[0] = NS_STATE_KEY_RESPONSE;
+    dtls_ccm_encrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ticket_nonce,
+      (u_char*) &ticket_buf[NS_CCM_N], NS_KEY_LEN + NS_IDENTITY_LEN + NS_TIMESTAMP_LEN,
+      NULL, 0);
+    /* TODO: Any way to check if the encryption was successful? */
 
-    /* Encrypt package for sender */
-    ns_encrypt_pkcs7((u_char*) key_sender, (u_char*) s_packet, (u_char*) &out_buffer[1],
-        sizeof(s_packet), NS_RIN_KEY_LENGTH);
+
+    /* Now we build the full message, containing the previously built ticket. */
+    char response_buf[NS_KEY_RESPONSE_LEN] = { 0 };
+
+    char response_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+    ns_random_nonce(response_nonce, NS_CCM_N);
+
+      /* Prepare the response for encryption:
+         Code, CCM Nonce, NS Nonce, ID, Key, Ticket */
+    response_buf[0] = NS_STATE_KEY_RESPONSE;
+    pos = 1;
+    memcpy(&response_buf[pos], response_nonce, NS_CCM_N);
+    pos += NS_CCM_N;
+    ns_alter_nonce(nonce, &response_buf[pos]); /* include altered nonce in response */
+    pos += NS_NONCE_LEN;
+    memcpy(&response_buf[pos], id_receiver, NS_IDENTITY_LEN);
+    pos += NS_IDENTITY_LEN;
+    memcpy(&response_buf[pos], session_key, NS_KEY_LEN);
+    pos += NS_KEY_LEN;
+    memcpy(&response_buf[pos], ticket_buf, NS_TICKET_LEN);
+
+    rijndael_ctx ctx2;
+    if(rijndael_set_key_enc_only(&ctx2, (u_char*) key_sender, 8 * NS_RIN_KEY_LEN) < 0) {
+    	ns_log_warning("unable to set key for Rijndael context (response encryption)");
+    	return;
+    }
     
-    context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
-    
-    ns_log_info("Sent STATE_KEY_RESPONSE. (Sender-ID: %s, Receiver-ID: %s, tmp-Key: %s)",
-      id_sender, id_receiver, tmp_key);
-    
+    dtls_ccm_encrypt_message(&ctx2, NS_CCM_M, NS_CCM_L, (u_char*) response_nonce,
+        (u_char*) &response_buf[1 + NS_CCM_N], /* Starting point is behind the CCM Nonce */
+      NS_NONCE_LEN + NS_IDENTITY_LEN + NS_KEY_LEN + NS_TICKET_LEN,
+      NULL, 0);
+    /* TODO: Any way to check if the encryption was successful? */
+
+    context->handler->write(context, &peer->addr, (uint8_t*) response_buf,
+      sizeof(response_buf));
+
+    ns_log_info("Sent key response.");
   }
 }
 
 void ns_handle_key_response(ns_context_t *context, ns_peer_t *server,
        char *packet, size_t len) {
   
+  /* Stop retransmissions
+     FIXME: Only stop retransmissions if the following process is successul? */
   ns_reset_buffer(server);
+
+  /* Decrypt the outer layer of the response */
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) context->key, 8 * NS_RIN_KEY_LEN) < 0) {
+    ns_log_error("unable to initiate Rijndael context.");
+    return;
+  }
   
-  char altered_nonce[NS_NONCE_LENGTH] = { 0 };
-  char partner_identity[NS_IDENTITY_LENGTH] = { 0 };
-  char com_key[NS_KEY_LENGTH] = { 0 };
-  char partner_packet[NS_ENC_COM_REQ_LENGTH] = { 0 };
+  /* take the nonce for CCM from the incoming packet */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE];
+  memcpy(ccm_nonce, &packet[1], NS_CCM_N);
 
-  char dec_packet[NS_ENC_KEY_RESPONSE_LENGTH];
-
-  ns_decrypt((u_char*) context->key, (u_char*) &packet[1],
-          (u_char*) dec_packet, sizeof(dec_packet), NS_RIN_KEY_LENGTH);
-
-  /* Get values from the decrypted packet */
-  int pos = 0;
-  memcpy(altered_nonce, &dec_packet[pos], sizeof(altered_nonce));
-  pos += sizeof(altered_nonce);
-  memcpy(partner_identity, &dec_packet[pos], sizeof(partner_identity));
-  pos += sizeof(partner_identity);
-  memcpy(com_key, &dec_packet[pos], sizeof(com_key));
-  pos += sizeof(com_key);
-  memcpy(partner_packet, &dec_packet[pos], sizeof(partner_packet));
+  if(dtls_ccm_decrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+     (u_char*) &packet[1 + NS_CCM_N], NS_KEY_RESPONSE_LEN - 1 - NS_CCM_N,
+     NULL, 0) <= 0) {
+    /* TODO: Error handling of decryption errors */
+    ns_log_warning("error while decrypting message");	
+    return;
+  }
   
+  /* get and verify the received nonce */
+  char altered_nonce[NS_NONCE_LEN];
+  memcpy(altered_nonce, &packet[1 + NS_CCM_N], NS_NONCE_LEN);
+
+  /* Check if I know the partners identity, discard the message if the partner
+     is unknown */
+  char partner_identity[NS_IDENTITY_LEN] = { 0 };
+  memcpy(partner_identity, &packet[1 + NS_CCM_N + NS_NONCE_LEN], NS_IDENTITY_LEN);
   ns_peer_t *partner;
   partner = ns_find_peer_by_identity(context, partner_identity);
-  
   if(!partner) {
-    ns_log_warning("received key response with unknown partner identity, discarding packet.");
+    ns_log_warning("key response with unknown partner identity, discarding packet");
     return;
   }
 
-  if(ns_verify_nonce(server->nonce, altered_nonce) == 0) {
-    memcpy(partner->key, com_key, NS_KEY_LENGTH);
-    context->state = NS_STATE_KEY_RESPONSE;
-    ns_log_debug("received new key from server.");
-    ns_send_com_request(context, partner, partner_packet);
-  } else {
-    ns_log_fatal("nonce verification failed!");
+  /* don't handle this packet if the received nonce is wrong */
+  if(ns_verify_nonce(server->nonce, altered_nonce) != 0) {
+    ns_log_warning("nonce verification failed!");
     context->state = NS_ERR_NONCE;
+    return;
   }
+
+  /* If the partner is known and we received the correct nonce we can store the
+     session key temporarily. (It will be stored via callback later, if the
+     challenge-response succeeds) */
+  memcpy(partner->key, &packet[1 + NS_CCM_N + NS_NONCE_LEN + NS_IDENTITY_LEN],
+    NS_KEY_LEN);
+
+  context->state = NS_STATE_KEY_RESPONSE;
+
+  ns_send_com_request(context, partner, &packet[1 + NS_CCM_N + NS_NONCE_LEN +
+    NS_IDENTITY_LEN + NS_KEY_LEN]);
 }
 
 void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet) {
   
-  char out_buffer[1+NS_ENC_COM_REQ_LENGTH];
+  char out_buffer[NS_COM_REQ_LEN];
   
   out_buffer[0] = NS_STATE_COM_REQUEST;
-  memcpy(&out_buffer[1], packet, NS_ENC_COM_REQ_LENGTH);
+  memcpy(&out_buffer[1], packet, NS_TICKET_LEN);
   
   ns_send_buffered(context, partner, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -653,39 +698,46 @@ void ns_send_com_request(ns_context_t *context, ns_peer_t *partner, char *packet
 
 void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, size_t len) {
-  
-  char dec_pkt[NS_ENC_COM_REQ_LENGTH];
-  char packet_time[NS_TIMESTAMP_LENGTH];
-  
-#ifdef NSDEBUG
-  char pkey[NS_RIN_KEY_LENGTH+1] = {0};
-  memcpy(pkey, context->key, NS_RIN_KEY_LENGTH);
-  ns_log_debug("Key used to decrypt: %s", pkey);
-  ns_dump_bytes_to_hex((unsigned char*)context->key, NS_RIN_KEY_LENGTH);
-#endif
 
-  ns_decrypt((u_char*) context->key, (u_char*) &in_buffer[1], (u_char*) dec_pkt,
-      sizeof(dec_pkt), NS_RIN_KEY_LENGTH);
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) context->key, 8 * NS_RIN_KEY_LEN) < 0) {
+    ns_log_error("unable to initiate Rijndael context.");
+    return;
+  }
+
+  /* get the CCM nonce from the received packet */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+  memcpy(ccm_nonce, &in_buffer[1], NS_CCM_N);
+
+  if(dtls_ccm_decrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+    (u_char*) &in_buffer[1 + NS_CCM_N], NS_TICKET_LEN - NS_CCM_N,
+    NULL, 0) <= 0) {
+    /* TODO: Error handling of decryption errors */
+    ns_log_warning("error while decrypting message");	
+    return;
+  }
     
   /* Temporarily remember the clients credentials, they will be stored via
      callback when the nonce verification succeeded */
-  memcpy(peer->key, dec_pkt, NS_KEY_LENGTH);
-  memcpy(peer->identity, &dec_pkt[NS_KEY_LENGTH], NS_IDENTITY_LENGTH);
-  memcpy(packet_time, &dec_pkt[NS_KEY_LENGTH + NS_IDENTITY_LENGTH], NS_TIMESTAMP_LENGTH);
+  int pos = 1 + NS_CCM_N;
+  memcpy(peer->key, &in_buffer[pos], NS_KEY_LEN);
+  pos += NS_KEY_LEN;
+  memcpy(peer->identity, &in_buffer[pos], NS_IDENTITY_LEN);
+  pos += NS_IDENTITY_LEN;
   
-  /* Validate time. Do nothing if validation fails */
-  if(ns_validate_timestamp(packet_time) != 0) {
+  /* Validate time. Don't handle this packet if validation fails */
+  if(ns_validate_timestamp(&in_buffer[pos]) != 0) {
     ns_log_warning("received packet with expired timestamp, discarding it."
       " (this may also be caused by a wrong key for decryption)");
     return;
   }
   
-#ifdef NSDEBUG
+#ifdef NS_DEBUG
   // FIXME shorter way to print these as strings?
-  char d_key[NS_KEY_LENGTH+1] = { 0 };
-  char d_identity[NS_IDENTITY_LENGTH+1] = { 0 };
-  memcpy(d_key, peer->key, NS_KEY_LENGTH);
-  memcpy(d_identity, peer->identity, NS_IDENTITY_LENGTH);
+  char d_key[NS_KEY_LEN+1] = { 0 };
+  char d_identity[NS_IDENTITY_LEN+1] = { 0 };
+  memcpy(d_key, peer->key, NS_KEY_LEN);
+  memcpy(d_identity, peer->identity, NS_IDENTITY_LEN);
   ns_log_debug("received com request. ( Sender-ID: %s, Key: %s )", d_identity, d_key);
 #endif
   
@@ -694,14 +746,14 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
 
 void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
   
-  char out_buffer[1 + NS_ENC_COM_CHALLENGE_LENGTH] = { 0 };
+  char out_buffer[1 + NS_ENC_COM_CHALLENGE_LEN] = { 0 };
 
   out_buffer[0] = NS_STATE_COM_CHALLENGE;
   
-  ns_random_key(peer->nonce, NS_NONCE_LENGTH);
+  ns_random_key(peer->nonce, NS_NONCE_LEN);
   
   ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LENGTH, NS_KEY_LENGTH);
+      NS_NONCE_LEN, NS_KEY_LEN);
   
   context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -717,12 +769,12 @@ void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
   ns_log_debug("received com challenge");
   context->state = NS_STATE_COM_CHALLENGE;
   
-  char dec_packet[NS_ENC_COM_CHALLENGE_LENGTH];
+  char dec_packet[NS_ENC_COM_CHALLENGE_LEN];
   
   ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1],
-        (u_char*) dec_packet, sizeof(dec_packet), NS_KEY_LENGTH);
+        (u_char*) dec_packet, sizeof(dec_packet), NS_KEY_LEN);
 
-  char altered_nonce[NS_NONCE_LENGTH] = { 0 };
+  char altered_nonce[NS_NONCE_LEN] = { 0 };
   ns_alter_nonce(dec_packet, altered_nonce);
 
   ns_send_com_response(context, peer, altered_nonce);
@@ -730,11 +782,11 @@ void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
 
 void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
   
-  char out_buffer[1+NS_ENC_COM_RESPONSE_LENGTH] = { 0 };
+  char out_buffer[1+NS_ENC_COM_RESPONSE_LEN] = { 0 };
   out_buffer[0] = NS_STATE_COM_RESPONSE;
   
   ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LENGTH, NS_KEY_LENGTH);
+      NS_NONCE_LEN, NS_KEY_LEN);
       
   ns_send_buffered(context, peer, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -745,10 +797,10 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, size_t len) {
 
-  char dec_packet[NS_ENC_COM_RESPONSE_LENGTH];
+  char dec_packet[NS_ENC_COM_RESPONSE_LEN];
   
   ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) dec_packet,
-      sizeof(dec_packet), NS_KEY_LENGTH);
+      sizeof(dec_packet), NS_KEY_LEN);
 
   /* only store the key if the nonce verification succeded. otherwise the peer
      will be deleted without storing any credentials */
@@ -807,14 +859,18 @@ void ns_retransmit(ns_context_t *context) {
   for(p = context->peers; p != NULL; p = p->hh.next) {
 #endif /* CONTIKI */
     /* resend if there is anything buffered */
-    if(p->msg_buf != NULL) {
-      if(p->retransmits < NS_RETRANSMIT_MAX) {
-        context->handler->write(context, &p->addr, p->msg_buf, p->msg_buf_len);
-        p->retransmits++;
-        ns_log_info("retransmitted message [%d/%d]", p->retransmits, NS_RETRANSMIT_MAX);
+    if(p->out_buf != NULL) {
+      if(p->out_buf->retransmits < NS_RETRANSMIT_MAX) {
+        context->handler->write(context, &p->addr, p->out_buf->data, p->out_buf->len);
+        p->out_buf->retransmits++;
+#ifdef NS_DEBUG
+        ns_log_info("retransmitted message [%d/%d]", p->out_buf->retransmits, NS_RETRANSMIT_MAX);
+#endif
       /* max retransmittions reached */
       } else {
+#ifdef NS_DEBUG
         ns_log_info("maximum retransmittions reached.");
+#endif
         context->state = NS_ERR_TIMEOUT;
         context->handler->event(NS_ERR_TIMEOUT);
       }
@@ -824,12 +880,30 @@ void ns_retransmit(ns_context_t *context) {
 
 void ns_reset_buffer(ns_peer_t *peer) {
   
-  free(peer->msg_buf);
-  peer->msg_buf = NULL;
-  peer->msg_buf_len = 0;
-  peer->retransmits = 0;
+  ns_free_out_item(peer->out_buf);
+  peer->out_buf = NULL;
 }
 
+/* Methods to alloc/dealloc outgoing messages */
+static inline ns_out_item_t*
+ns_alloc_out_item() {
+#ifdef CONTIKI
+  return (ns_out_item_t*) memb_alloc(&ns_out_buf_store);
+#else
+  return (ns_out_item_t*) malloc(sizeof(ns_out_item_t));
+#endif /* CONTIKI */
+}
+
+static inline void
+ns_free_out_item(ns_out_item_t *item) {
+#ifdef CONTIKI
+  memb_free(&ns_out_buf_store, item);
+#else
+  free(item);
+#endif /* CONTIKI */
+}
+
+/* Methods to alloc/dealloc peers */
 static inline ns_peer_t*
 ns_alloc_peer() {
 #ifdef CONTIKI
@@ -838,9 +912,10 @@ ns_alloc_peer() {
   return (ns_peer_t*) malloc(sizeof(ns_peer_t));
 #endif /* CONTIKI */
 }
-#1
+
 static inline void
 ns_free_peer(ns_peer_t *peer) {
+  ns_free_out_item(peer->out_buf);
 #ifdef CONTIKI
   memb_free(&ns_peers_store, peer);
 #else
@@ -868,18 +943,23 @@ ns_peer_t* ns_find_or_create_peer(ns_context_t *context,
   peer = ns_alloc_peer();
   
   if(!peer) {
+#ifdef NS_DEBUG
     ns_log_warning("no memory: alloc ns_peer_t");
+#endif
     return peer;
   }
   
   /* ok, we have enough memory and a newly created peer, initialize it with data */
+  memset(peer, 0, sizeof(ns_peer_t));
   memcpy(&peer->addr, peer_addr, sizeof(ns_abstract_address_t));
-  ns_reset_peer(peer);
+  peer->state = NS_STATE_INITIAL;
   
   ns_add_peer(context, peer);
 
+#ifdef NS_DEBUG
   ns_log_debug("created new peer");
-  
+#endif
+
   return peer;
 }
 
@@ -955,14 +1035,16 @@ ns_peer_t* ns_find_peer_by_identity(ns_context_t *context, char *identity) {
 
 void ns_reset_peer(ns_peer_t *peer) {
   
-  memset(peer->nonce, 0, NS_NONCE_LENGTH);
-  memset(peer->identity, 0, NS_IDENTITY_LENGTH);
-  memset(peer->key, 0, NS_KEY_LENGTH);
+  memset(peer->nonce, 0, NS_NONCE_LEN);
+  memset(peer->identity, 0, NS_IDENTITY_LEN);
+  memset(peer->key, 0, NS_KEY_LEN);
   peer->expires = 0;
   peer->state = NS_STATE_INITIAL;
-  peer->msg_buf = NULL;
-  peer->msg_buf_len = 0;
-  peer->retransmits = 0;
+
+  if(peer->out_buf)
+	ns_free_out_item(peer->out_buf);
+  peer->out_buf = NULL;
+
 }
 
 void ns_cleanup(ns_context_t *context) {
@@ -994,7 +1076,7 @@ void ns_cleanup(ns_context_t *context) {
  */
 void ns_create_timestamp(char* timestamp) {
 
-  uint64_t now; /* should be big enough for every reasonable timestamp */
+  uint64_t now; /* big enough for every reasonable timestamp */
   
 #ifndef CONTIKI
   time_t t;
@@ -1031,7 +1113,7 @@ int ns_validate_timestamp(char* timestamp) {
 #endif /* CONTIKI */
 
   if(now - t > NS_KEY_LIFETIME) {
-#ifdef NSDEBUG
+#ifdef NS_DEBUG
     ns_log_debug("current time is: %llu, received timestamp: %llu. (now - t = %llu)\n",
       now, t, (now - t));
 #endif
@@ -1073,7 +1155,7 @@ int ns_discard_invalid_messages(ns_context_t *context, char *buf, size_t len) {
 
 void ns_set_credentials(ns_context_t *context, char *identity, char *key) {
   
-#ifdef NSDEBUG
+#ifdef NS_DEBUG
   if(identity == NULL)
     ns_log_error("identity is NULL");
     
@@ -1081,8 +1163,8 @@ void ns_set_credentials(ns_context_t *context, char *identity, char *key) {
     ns_log_error("key is NULL");
 #endif
 
-  memcpy(context->identity, identity, NS_IDENTITY_LENGTH);
-  memcpy(context->key, key, NS_RIN_KEY_LENGTH);
+  memcpy(context->identity, identity, NS_IDENTITY_LEN);
+  memcpy(context->key, key, NS_RIN_KEY_LEN);
 }
 
 void ns_set_role(ns_context_t *context, ns_role_t role) {
@@ -1114,6 +1196,7 @@ ns_context_t* ns_initialize_context(void *app, ns_handler_t *handler) {
   /* Initialize memory blocks */
   memb_init(&ns_context_store);
   memb_init(&ns_peers_store);
+  memb_init(&ns_out_buf_store);
 #endif
   
   ns_context_t *context = NULL;
@@ -1143,16 +1226,12 @@ void ns_free_peers(ns_context_t *context) {
 #ifdef CONTIKI
   for(peer = list_head(context->peers); peer; peer = list_item_next(peer)) {
     list_remove(context->peers, peer);
-    if(peer->msg_buf)
-      free(peer->msg_buf);
     ns_free_peer(peer);
   }
 #else /* CONTIKI */
   ns_peer_t *tmp;
   HASH_ITER(hh, context->peers, peer, tmp) {
     HASH_DEL(context->peers, peer);
-    if(peer->msg_buf)
-      free(peer->msg_buf);
     ns_free_peer(peer);
   }
 #endif /* CONTIKI */

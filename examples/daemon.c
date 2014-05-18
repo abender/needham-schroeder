@@ -4,8 +4,8 @@
 
 typedef struct {
   UT_hash_handle hh;
-  char name[NS_IDENTITY_LENGTH];
-  char key[NS_KEY_LENGTH];
+  char name[NS_IDENTITY_LEN];
+  char key[NS_KEY_LEN];
 } identity_t;
 
 identity_t *identities = NULL;
@@ -22,13 +22,13 @@ int store_key(char *identity_name, char *key) {
   /* identity not found, insert a new one */
   if(id == NULL) {
     id = malloc(sizeof(identity_t));
-    memcpy(id->name, identity_name, NS_IDENTITY_LENGTH);
-    memcpy(id->key, key, NS_KEY_LENGTH);
+    memcpy(id->name, identity_name, NS_IDENTITY_LEN);
+    memcpy(id->key, key, NS_KEY_LEN);
     HASH_ADD_STR(identities, name, id);
     
   /* identity was already present, update the key */
   } else {
-    memcpy(id->key, key, NS_KEY_LENGTH);    
+    memcpy(id->key, key, NS_KEY_LEN);    
   }
   return 0;
 }
@@ -39,7 +39,7 @@ int get_key(char *identity_name, char *key) {
   HASH_FIND_STR(identities, identity_name, id);
 
   if(id) {
-    memcpy(key, id->key, NS_KEY_LENGTH);
+    memcpy(key, id->key, NS_KEY_LEN);
     return 0;
   } else {
     return -1;
