@@ -604,13 +604,12 @@ void ns_handle_key_request(ns_context_t *context, ns_peer_t *peer,
     pos += NS_KEY_LEN;
     memcpy(&response_buf[pos], ticket_buf, NS_TICKET_LEN);
 
-    rijndael_ctx ctx2;
-    if(rijndael_set_key_enc_only(&ctx2, (u_char*) key_sender, 8 * NS_RIN_KEY_LEN) < 0) {
+    if(rijndael_set_key_enc_only(&ctx, (u_char*) key_sender, 8 * NS_RIN_KEY_LEN) < 0) {
     	ns_log_warning("unable to set key for Rijndael context (response encryption)");
     	return;
     }
     
-    dtls_ccm_encrypt_message(&ctx2, NS_CCM_M, NS_CCM_L, (u_char*) response_nonce,
+    dtls_ccm_encrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) response_nonce,
         (u_char*) &response_buf[1 + NS_CCM_N], /* Starting point is behind the CCM Nonce */
       NS_NONCE_LEN + NS_IDENTITY_LEN + NS_KEY_LEN + NS_TICKET_LEN,
       NULL, 0);
@@ -746,14 +745,30 @@ void ns_handle_com_request(ns_context_t *context, ns_peer_t *peer,
 
 void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
   
-  char out_buffer[1 + NS_ENC_COM_CHALLENGE_LEN] = { 0 };
+  char out_buffer[NS_COM_CHALLENGE_LEN] = { 0 };
 
   out_buffer[0] = NS_STATE_COM_CHALLENGE;
+
+  /* create the challenge-response nonce */
+  ns_random_nonce(peer->nonce, NS_NONCE_LEN);
+  memcpy(&out_buffer[1 + NS_CCM_N], peer->nonce, NS_NONCE_LEN);
   
-  ns_random_key(peer->nonce, NS_NONCE_LEN);
+  /* create the nonce used by CCM */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+  ns_random_nonce(ccm_nonce, NS_CCM_N);
+  memcpy(&out_buffer[1], ccm_nonce, NS_CCM_N);
   
-  ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) peer->nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LEN, NS_KEY_LEN);
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) peer->key, 8 * NS_RIN_KEY_LEN) < 0) {
+  	ns_log_warning("unable to set key");
+  	return;
+  }
+  
+  dtls_ccm_encrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+      (u_char*) &out_buffer[1 + NS_CCM_N], /* Starting point is behind the CCM Nonce */
+    NS_NONCE_LEN,
+    NULL, 0);
+  /* TODO: Any way to check if the encryption was successful? */
   
   context->handler->write(context, &peer->addr, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -764,29 +779,60 @@ void ns_send_com_challenge(ns_context_t *context, ns_peer_t *peer) {
 void ns_handle_com_challenge(ns_context_t *context, ns_peer_t *peer,
        char *in_buffer, size_t len) {
   
+  /* stop retransmission */
   ns_reset_buffer(peer);
   
   ns_log_debug("received com challenge");
   context->state = NS_STATE_COM_CHALLENGE;
   
-  char dec_packet[NS_ENC_COM_CHALLENGE_LEN];
-  
-  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1],
-        (u_char*) dec_packet, sizeof(dec_packet), NS_KEY_LEN);
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) peer->key, 8 * NS_RIN_KEY_LEN) < 0) {
+    ns_log_error("unable to initiate Rijndael context.");
+    return;
+  }
 
+  /* get the CCM nonce from the received packet */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+  memcpy(ccm_nonce, &in_buffer[1], NS_CCM_N);
+
+  if(dtls_ccm_decrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+    (u_char*) &in_buffer[1 + NS_CCM_N], NS_NONCE_LEN + NS_CCM_M,
+    NULL, 0) <= 0) {
+    /* TODO: Error handling of decryption errors */
+    ns_log_warning("error while decrypting message");	
+    return;
+  }
+  
   char altered_nonce[NS_NONCE_LEN] = { 0 };
-  ns_alter_nonce(dec_packet, altered_nonce);
+  ns_alter_nonce(&in_buffer[1 + NS_CCM_N], altered_nonce);
 
   ns_send_com_response(context, peer, altered_nonce);
 }
 
 void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
   
-  char out_buffer[1+NS_ENC_COM_RESPONSE_LEN] = { 0 };
+  char out_buffer[NS_COM_RESPONSE_LEN] = { 0 };
   out_buffer[0] = NS_STATE_COM_RESPONSE;
   
-  ns_encrypt_pkcs7((u_char*) peer->key, (u_char*) nonce, (u_char*) &out_buffer[1],
-      NS_NONCE_LEN, NS_KEY_LEN);
+  /* copy the altered nonce to the buffer, it will be encrypted in place */
+  memcpy(&out_buffer[1 + NS_CCM_N], nonce, NS_NONCE_LEN);
+  
+  /* create the nonce used by CCM */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+  ns_random_nonce(ccm_nonce, NS_CCM_N);
+  memcpy(&out_buffer[1], ccm_nonce, NS_CCM_N);
+  
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) peer->key, 8 * NS_RIN_KEY_LEN) < 0) {
+  	ns_log_warning("unable to set key");
+  	return;
+  }
+  
+  dtls_ccm_encrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+      (u_char*) &out_buffer[1 + NS_CCM_N], /* Starting point is behind the CCM Nonce */
+    NS_NONCE_LEN,
+    NULL, 0);
+  /* TODO: Any way to check if the encryption was successful? */
       
   ns_send_buffered(context, peer, (uint8_t*) out_buffer, sizeof(out_buffer));
   
@@ -797,14 +843,27 @@ void ns_send_com_response(ns_context_t *context, ns_peer_t *peer, char *nonce) {
 void ns_handle_com_response(ns_context_t *context, ns_peer_t *peer,
       char *in_buffer, size_t len) {
 
-  char dec_packet[NS_ENC_COM_RESPONSE_LEN];
-  
-  ns_decrypt((u_char*) peer->key, (u_char*) &in_buffer[1], (u_char*) dec_packet,
-      sizeof(dec_packet), NS_KEY_LEN);
+  rijndael_ctx ctx;
+  if(rijndael_set_key_enc_only(&ctx, (u_char*) peer->key, 8 * NS_RIN_KEY_LEN) < 0) {
+    ns_log_error("unable to initiate Rijndael context.");
+    return;
+  }
 
+  /* get the CCM nonce from the received packet */
+  char ccm_nonce[DTLS_CCM_BLOCKSIZE] = { 0 };
+  memcpy(ccm_nonce, &in_buffer[1], NS_CCM_N);
+
+  if(dtls_ccm_decrypt_message(&ctx, NS_CCM_M, NS_CCM_L, (u_char*) ccm_nonce,
+    (u_char*) &in_buffer[1 + NS_CCM_N], NS_NONCE_LEN + NS_CCM_M,
+    NULL, 0) <= 0) {
+    /* TODO: Error handling of decryption errors */
+    ns_log_warning("error while decrypting message");	
+    return;
+  }
+  
   /* only store the key if the nonce verification succeded. otherwise the peer
      will be deleted without storing any credentials */
-  if(ns_verify_nonce(peer->nonce, dec_packet) == 0) {
+  if(ns_verify_nonce(peer->nonce, &in_buffer[1 + NS_CCM_N]) == 0) {
     context->handler->store_key(peer->identity, peer->key);
     ns_send_com_confirm(context, peer);
     ns_log_info("completed ns-handshake and stored new key.");

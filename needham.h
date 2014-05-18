@@ -113,11 +113,9 @@ typedef unsigned int clock_time_t;
 
 #define NS_COM_REQ_LEN (1 + NS_TICKET_LEN)
 
-#define NS_ENC_COM_CHALLENGE_LEN \
-  (ns_padded_length(NS_NONCE_LEN))
+#define NS_COM_CHALLENGE_LEN (1 + NS_CCM_N + NS_NONCE_LEN + NS_CCM_M)
 
-#define NS_ENC_COM_RESPONSE_LEN \
-  (ns_padded_length(NS_NONCE_LEN))
+#define NS_COM_RESPONSE_LEN (1 + NS_CCM_N + NS_NONCE_LEN + NS_CCM_M)
 
 #ifndef MAX
 #define MAX(A,B) ((A) <= (B) ? (B) : (A))
@@ -125,7 +123,7 @@ typedef unsigned int clock_time_t;
 
 /* The size of the largest outgoing message that needs to be buffered */
 #define NS_MAX_OUT_SIZE (MAX(NS_KEY_REQUEST_LEN, (MAX(NS_COM_REQ_LEN, \
-  NS_ENC_COM_RESPONSE_LEN))))
+  NS_COM_RESPONSE_LEN))))
 
 /* Buffer sizes for each application type. */
 #define NS_DAEMON_BUFFER_SIZE NS_COM_REQ_LEN

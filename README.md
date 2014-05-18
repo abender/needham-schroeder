@@ -6,7 +6,7 @@ seNS is a small and simple C-library to perform an extended (symmetric) Needham-
 * Run a NS-daemon, waiting for clients to initialize the communication
 * Run a NS-client, retrieving keys from the server and connecting to NS-daemons.
 
-The library provides callback functions so the user may decide how keys will be stored/retrieved and how events will be handled.
+The library provides callback functions so the user may decide how keys will be stored/retrieved and how events will be handled. Encryption of the protocol messages is done via [CCM](https://tools.ietf.org/html/rfc3610).
 
 The library has been tested with Debian/Linux Systems and OS X. Basic compatibility with [Contiki-OS](http://www.contiki-os.org/) is there, but needs improvements.
 
@@ -19,7 +19,7 @@ The library has been tested with Debian/Linux Systems and OS X. Basic compatibil
 
 ## Configuration
 
-It is intended, that the user may choose lengths for all attributes of the NS-protocol (e.g. The length of identities, nonces and keys). While those for identities and nonces can be freely chosen, the lengths of the keys must be 16 Bytes, so they can be used for AES-128 and [CCM](https://tools.ietf.org/html/rfc3610)
+It is intended, that the user may choose lengths for all attributes of the NS-protocol (e.g. The length of identities, nonces and keys). While those for identities and nonces can be freely chosen, the lengths of the keys must be 16 Bytes, so they can be used for CCM.
 
 The NS-client performs retransmissions to deal with lossy networks. To adjust its parameters change `NS_RETRANSMIT_TIMEOUT` and `NS_RETRANSMIT_MAX` accordingly.
 
