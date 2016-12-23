@@ -1,3 +1,7 @@
+# Discontinued!
+
+**Please note: this project is only for archiving reasons on Github. You may use the code as you like (on your own risk), but I'm neither working on it anymore nor have time to answer questions about its usage or the Needham Schroeder protocol.**
+
 # seNS - a simple extended Needham-Schroeder C-library
 
 seNS is a small and simple C-library to perform an extended (symmetric) Needham-Schroeder(NS)-protocol. Extended means, that the basic NS-Protocol has been extended to make use of timestamps, which are used to solve several vulnerabilities by the original protocol. (See "[Security Engineering](http://www.cl.cam.ac.uk/~rja14/book.html)" Chapter 3.7.2 by Ross Anderson). It provides basic functions to:
@@ -36,10 +40,7 @@ See `needham.h` for a description of all modifiable values.
 
 ## Authors and Contact
 
-seNS was written by Andreas Bender <bender86@arcor.de>
-
-If you have any questions, remarks, suggestion, improvements,
-etc. feel free to drop a line at the address given above.
+seNS was written by Andreas Bender
 
 ## License
 
